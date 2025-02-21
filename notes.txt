@@ -5,4 +5,5 @@ To-Do:
 
 Long Term:
 
-- pick/ create environment that is well suited to llm-pruning
+- Pick/ create environment that is well suited to llm-pruning (Strategy games with discrete action space)
+  - PettingZoo - Texas Hold 'Em
