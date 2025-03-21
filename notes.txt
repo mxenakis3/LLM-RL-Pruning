@@ -2,6 +2,8 @@ To-Do:
 - rename folder
 - make environment modular
 - make github repository
+- add utility file with stuff like get optimizer, get environment, get_render_mode
+- organize config files - make separate folders for each
 
 Long Term:
 

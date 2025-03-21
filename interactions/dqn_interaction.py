@@ -2,10 +2,10 @@ import gymnasium as gym
 import torch as torch
 import numpy as np
 from agents.dqn_agent import DeepQNetwork
-from agents.llm_chain_of_though_agent import Chain_of_Thought
+from agents.llm_chain_of_thought_agent import Chain_of_Thought
 from tqdm import tqdm
-from configs.i_dqn_LL_default import dqn_lunar_lander_default_configs_dict as dqn_ll_config
-from configs.a_lunarlander_cot_agent import lunarlander_cot_agent_configs as cot_ll_config
+from configs.interaction_configs.i_dqn_LL_default import dqn_lunar_lander_default_configs_dict as dqn_ll_config
+from configs.agent_configs.a_lunarlander_cot_agent import lunarlander_cot_agent_configs as cot_ll_config
 class DQNInteraction:
   """
   Generic Class for agent/environment interaction.
