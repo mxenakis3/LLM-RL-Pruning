@@ -1,6 +1,6 @@
 import torch as torch
 import torch.nn as nn
-from replay_buffer import PPOReplayBuffer
+from replay_buffer import ReplayBuffer
 import numpy as np
 
 
@@ -15,7 +15,7 @@ class DeepQNetwork(nn.Module):
     super().__init__() # Call nn.Module superclass
 
     # INITIALIZE REPLAY BUFFER
-    self.replay_buffer = PPOReplayBuffer(capacity = config.replay_buffer_size, batch_size = config.batch_size)
+    self.replay_buffer = ReplayBuffer(capacity = config.replay_buffer_size, batch_size = config.batch_size)
 
     # Store discount rate
     self.gamma = config.gamma
