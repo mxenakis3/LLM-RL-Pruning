@@ -1,0 +1,21 @@
+---------------------------------------
+Begin Slurm Prolog: Mar-28-2025 10:17:12
+Job ID:    2381373
+User ID:   nwong70
+Account:   chbe
+Job name:  lico-6
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+---------------------------------------
+Begin Slurm Epilog: Mar-28-2025 10:18:58
+Job ID:        2381373
+User ID:       nwong70
+Account:       chbe
+Job name:      lico-6
+Resources:     cpu=8,gres/gpu:h100=1,mem=24G,node=1
+Rsrc Used:     cput=00:14:08,vmem=0,walltime=00:01:46,mem=432552K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-18-0
+---------------------------------------
