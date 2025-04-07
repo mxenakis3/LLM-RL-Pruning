@@ -3,3 +3,4 @@ __pychache__/
 *.env
 *.egg-info
 *.pyc
+.ipynb_checkpoints/
