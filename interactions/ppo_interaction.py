@@ -1,6 +1,6 @@
 import torch as torch
 import gymnasium as gym
-from agents.ppo_agents import PPONetwork
+from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
 from tqdm import tqdm
 from configs.agent_configs.a_ppo_agents import critic_configs, actor_configs
 import torch.distributions as dist
@@ -18,39 +18,40 @@ class PPO_interaction:
         self.num_episodes = interaction_config.training_episodes
         self.testing_episodes = interaction_config.testing_episodes
         self.update_frequency = interaction_config.update_frequency
-        self.policy = PPONetwork(obs_size = self.obs_size, 
+        self.critic = PPOCriticNetwork(obs_size = self.obs_size, 
                                  action_size=self.action_size,
-                                 actor_config=actor_configs,
                                  critic_config=critic_configs)
-        self.old_policy = PPONetwork(obs_size = self.obs_size, 
+        self.policy = PPOActorNetwork(obs_size = self.obs_size, 
                                  action_size=self.action_size,
-                                 actor_config=actor_configs,
-                                 critic_config=critic_configs)
+                                 actor_config=actor_configs)
+        self.old_policy = PPOActorNetwork(obs_size = self.obs_size, 
+                                 action_size=self.action_size,
+                                 actor_config=actor_configs)
         self.old_policy.load_state_dict(self.policy.state_dict())
 
         # Initialize hyperparemeters
-        self.c = interaction_config.c
-        self.gamma = interaction_config.gamma
+        self.c = interaction_config.c # clipping factor (0 <= x <= 1) for PPO
         self.batch_size = interaction_config.batch_size
-        self.k = interaction_config.k
+        self.k = interaction_config.k # number of training epochs
 
         # Initialize memory
         self.memory = ReplayBuffer(capacity=interaction_config.capacity, 
                                    batch_size=self.batch_size)
         
-        # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.policy.parameters(),
-                                          lr = interaction_config.learning_rate)
+        # # Initialize optimizer
+        # self.optimizer = torch.optim.Adam(self.policy.parameters(),
+        #                                   lr = interaction_config.learning_rate)
 
     def act(self, state):
         s = torch.Tensor(state)
         with torch.no_grad():
-            action_probs = self.old_policy.actor(s)
+            action_probs = self.old_policy.model(s)
         distribution = dist.Categorical(action_probs)
         a = distribution.sample().item()
         return a
     
     def update(self):
+        print(f"Updating...")
         # First shuffle the data in memory
         mem_list = list(self.memory.buffer)
         random.shuffle(mem_list) # shuffled list of tuples. s, s_ are numpy ndarrays, a, r, dones are floats or bools.
@@ -64,9 +65,9 @@ class PPO_interaction:
 
         # calculate advantages
         with torch.no_grad():
-            vs_vector = self.old_policy.critic(s_vector)
-            vs__vector = self.old_policy.critic(s__vector)
-            advantages_vector = r_vector + ((self.gamma*vs__vector))*(1-dones_vector) - vs_vector
+            vs_vector = self.critic.model(s_vector)
+            vs__vector = self.critic.model(s__vector)
+            advantages_vector = r_vector + ((self.critic.gamma*vs__vector))*(1-dones_vector) - vs_vector
             returns_vector = advantages_vector + vs_vector
 
         # Update gradients
@@ -80,15 +81,15 @@ class PPO_interaction:
                 batch_advantages = advantages_vector[idx: idx+self.batch_size]
                 batch_returns = returns_vector[idx: idx+self.batch_size]
 
-
                 # Get old policy probabilities
                 with torch.no_grad():
-                    old_probs = self.old_policy.actor(batch_s) #shape: [batch_size, action_space.n]
+                    # old_probs = self.old_policy.actor(batch_s) #shape: [batch_size, action_space.n]
+                    old_probs = self.old_policy.model(batch_s) #shape: [batch_size, action_space.n]
                     old_prob_distribution = dist.Categorical(old_probs)#shape: [batch_size, action_space.n]
                     old_logprobs = old_prob_distribution.log_prob(batch_a)
         
                 # Get new probabilities. We will backpropagate on these. 
-                new_probs = self.policy.actor(batch_s)
+                new_probs = self.policy.model(batch_s)
                 new_prob_distribution = dist.Categorical(new_probs) # Do this so we can get the entropy of the prob dist
                 new_logprobs = new_prob_distribution.log_prob(batch_a) # gets the logprobs of the actions that were actually taken
                 entropy = new_prob_distribution.entropy().mean()
@@ -101,17 +102,19 @@ class PPO_interaction:
                 actor_loss = -torch.min(surr1, surr2).mean() - 0.01 * entropy
 
                 # Critic loss
-                values_pred = self.policy.critic(batch_s)
+                values_pred = self.critic.model(batch_s)
                 critic_loss = 0.5 * (values_pred - batch_returns).pow(2).mean()
 
-                # Total loss
-                loss = actor_loss + critic_loss
-                
-                # Backpropagation
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-        
+                # Update critic
+                self.critic.optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic.optimizer.step()
+
+                # Update actor
+                self.policy.optimizer.zero_grad()
+                actor_loss.backward()
+                self.policy.optimizer.step()
+
         # clear the buffer and fix old policy
         self.memory.clear()
         self.old_policy.load_state_dict(self.policy.state_dict())

@@ -22,7 +22,7 @@ critic_configs = Config({
 })
 
 actor_configs = Config({
-  # AGENT CONFIGURATIONS
+# AGENT CONFIGURATIONS
 "learning_rate": .0001,
 "replay_buffer_size": 100000,
 "loss_function": "mseloss", # We are performing gradient ascent, so we will need to fix this
@@ -39,5 +39,4 @@ actor_configs = Config({
 "learning_frequency": 4,
 "c": 0.2, # clipping range
 "is_actor": True
-
 })

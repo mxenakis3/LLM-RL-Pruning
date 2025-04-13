@@ -4,14 +4,14 @@ ppo_interaction_config = Config({
 "env": "lunarlander-v3",
 "learning_rate": .0003,
 "c": 0.2,
-"training_episodes": 3000,
+"training_episodes": 100,
 "render_mode_train": "None", # "human" plays an animation, "None" skips the animation
 "render_mode_test": "human", # "human" plays an animation, "None" skips the animation 
 "continuous": False, # Discrete, or continuous simulation -- OpenAI parameter
 "testing_episodes": 100,
 "batch_size":64,
 "capacity": 2048,
-"gamma": 0.990,
+"gamma": 0.99,
 "k": 4, # number of batches in each iteration of learning
 "num_epochs": 4,
 "update_frequency": 2048
