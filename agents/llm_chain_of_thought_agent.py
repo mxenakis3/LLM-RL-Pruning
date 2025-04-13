@@ -1,14 +1,15 @@
 from openai import OpenAI
 import re
 import numpy as np
+from LLM.local_LLM import get_model
 
-
-client = OpenAI()
+#client = OpenAI()
 
 class Chain_of_Thought():
   def __init__(self, config):
     # Initialize client
-    self.client = OpenAI()
+    #self.client = OpenAI()
+    self.client = get_model()
 
     self.system_message = config.system_message
 
@@ -29,26 +30,26 @@ class Chain_of_Thought():
 
       # cot_prompt format: {"role": "user", "content": "chain of thought string"}
       self.messages.append(cot_prompt)
-
       # Prompt the client based on the current set of messages
       completion = self._execute()
       self.messages.append(completion)
     
     # Input the last action chosen
-    action = self._check_action_selection(self.messages[-1].choices[0].message.content)
+    #action = self._check_action_selection(self.messages[-1].choices[0].message.content)
+    action = self._check_action_selection(self.messages[-1]["content"])
   
     # Clear messages from training step
     self.messages = []
     return action
 
   def _execute(self):
-    completion = self.client.chat.completions.create(
-      model="gpt-4o",
-      messages = self.messages
-    )
-    
-    return completion
-  
+    #completion = self.client.chat.completions.create(
+    #  model="gpt-4o",
+    #  messages = self.messages
+    #)
+    completion = self.client(self.messages)
+    #return completion
+    return {"role": "assistant", "content": completion[0].outputs[0].text}
 
   def _check_action_selection(self, action_selection):
       # Normalize input

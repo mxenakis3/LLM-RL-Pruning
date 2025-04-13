@@ -1,0 +1,21 @@
+---------------------------------------
+Begin Slurm Prolog: Mar-28-2025 10:22:12
+Job ID:    2381375
+User ID:   nwong70
+Account:   chbe
+Job name:  PPO
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+---------------------------------------
+Begin Slurm Epilog: Mar-28-2025 10:24:10
+Job ID:        2381375
+User ID:       nwong70
+Account:       chbe
+Job name:      PPO
+Resources:     cpu=8,gres/gpu:h100=1,mem=24G,node=1
+Rsrc Used:     cput=00:15:44,vmem=0,walltime=00:01:58,mem=969208K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-23-0
+---------------------------------------

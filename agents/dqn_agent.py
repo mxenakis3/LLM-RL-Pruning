@@ -1,6 +1,6 @@
 import torch as torch
 import torch.nn as nn
-from replay_buffer import PPOReplayBuffer
+from replay_buffer import ReplayBuffer
 import numpy as np
 
 
@@ -14,14 +14,17 @@ class DeepQNetwork(nn.Module):
   def __init__(self, config):
     super().__init__() # Call nn.Module superclass
 
+    # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # INITIALIZE REPLAY BUFFER
-    self.replay_buffer = PPOReplayBuffer(capacity = config.replay_buffer_size, batch_size = config.batch_size)
+    self.replay_buffer = ReplayBuffer(capacity = config.replay_buffer_size, batch_size = config.batch_size)
 
     # Store discount rate
     self.gamma = config.gamma
 
     # Initialize model
     self.model = self.create_model(config.hidden_layer_sizes, config.activations, config.obs_size, config.action_space_size)
+    # self.model.to(self.device)
 
     # Get loss function
     self.loss_function = self._get_loss_function(config.loss_function)
@@ -35,7 +38,7 @@ class DeepQNetwork(nn.Module):
       self.target_network = self.create_model(config.hidden_layer_sizes, config.activations, config.obs_size, config.action_space_size)
       # Copy initial weights
       self.target_network.load_state_dict(self.model.state_dict())
-    
+
     # This step counter is used to check later when we need to update the target network
     self.step_counter = 0
 
@@ -45,6 +48,37 @@ class DeepQNetwork(nn.Module):
     # Number of steps we take before we learn again
     self.learning_frequency = config.learning_frequency
 
+  def select_action(self, observation):
+    """
+    Selects action from observation space for pettingzoo environments
+    """
+    # extract observation space
+    obs = observation["observation"] if isinstance(observation, dict) else observation
+    mask = observation.get("action_mask", None)
+
+    # flatten
+    obs = np.array(obs).flatten()
+    s_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+
+    with torch.no_grad():
+        q_values = self.model(s_tensor).squeeze(0).numpy()
+
+    # mask out illegal moves
+    if mask is not None:
+        mask = np.array(mask)
+        # Set Q-values for illegal moves to -infinity.
+        q_values[mask == 0] = -np.inf
+
+    # choose action with the highest masked Q-value.
+    a = int(np.argmax(q_values))
+
+    # if chosen action isn't legal, then choose a random legal move
+    if mask is not None and mask[a] == 0:
+        legal_actions = np.where(mask == 1)[0]
+        if legal_actions.size == 0:
+            return None
+        a = int(np.random.choice(legal_actions))
+    return a
 
 
   def create_model(self, hidden_layer_sizes, activations, obs_size, action_space_size):
@@ -65,7 +99,7 @@ class DeepQNetwork(nn.Module):
       layers.append(nn.Linear(prev_size, h))
       layers.append(self._get_activations(activations[i]))
       prev_size = h
-    
+
     # Output layer
     layers.append(nn.Linear(prev_size, action_space_size))
 
@@ -86,7 +120,7 @@ class DeepQNetwork(nn.Module):
     }
     return activations.get(activation_name.lower(), nn.ReLU())
 
-  
+
   def _get_loss_function(self, loss_name):
     """
     Helper function:
@@ -129,12 +163,12 @@ class DeepQNetwork(nn.Module):
 
   def learn(self):
     """
-    Perform gradient descent and update weights. 
+    Perform gradient descent and update weights.
     """
     """
-    We want to update our estimate of the "value", or "Expected Reward" of taking action 'a' from state 's', whose true value is denoted Q(s,a). 
+    We want to update our estimate of the "value", or "Expected Reward" of taking action 'a' from state 's', whose true value is denoted Q(s,a).
     Currently, our approximation for the value of state 's' is parameterized by a set of parameters which we will call 'w'. ie) we have Q_{w} (s, a)
-    
+
     We'll update Q_{w} (s, a) towards the value of the next state we reach from (s, a).
     This value is our bootstrapped estimate of the value of the best action that can be taken at its following state, Q_{w} (s_,a_).
 
@@ -142,16 +176,16 @@ class DeepQNetwork(nn.Module):
 
     The greater the difference between the current value of Q(s, a) and this updated estimate for Q(s, a), the greater the loss.
 
-    We will then find the gradient of this loss function (taken over many examples) with respect to the weights, w. 
+    We will then find the gradient of this loss function (taken over many examples) with respect to the weights, w.
 
     Finally, we will update the weights in the direction that minimizes this loss function.
 
-    The boostrapped estimates are initially biased, but as the number of training episodes increase, the bias will decrease. But bootstrapping early on like this will prevent overfitting. 
+    The boostrapped estimates are initially biased, but as the number of training episodes increase, the bias will decrease. But bootstrapping early on like this will prevent overfitting.
     """
     # Return if there are not enough samples
     if len(self.replay_buffer) < self.replay_buffer.batch_size:
-      return 
-  
+      return
+
     # Randomly sample a batch of experiences
     # self.replay_buffer.sample: list of tuples
     s, a, r, s_, done = zip(*self.replay_buffer.sample())
@@ -186,7 +220,7 @@ class DeepQNetwork(nn.Module):
     # Clear old gradients from previous iteration - we want to start with a fresh gradient
     self.optimizer.zero_grad()
 
-    # Performs backpropogation - 
+    # Performs backpropogation -
     # Here, loss is a scalar tensor whose value is derived from the forward passes
     loss.backward()
 
@@ -199,8 +233,7 @@ class DeepQNetwork(nn.Module):
     if self.target_network_exists:
       self.target_network.load_state_dict(self.model.state_dict())
 
-    
-    
-    
-    
-   
+
+
+
+
