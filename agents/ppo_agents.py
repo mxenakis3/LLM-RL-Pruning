@@ -45,6 +45,7 @@ class PPOCriticNetwork(nn.Module):
     self.model = self._make_network(critic_config)
 
     self.gamma = critic_config.gamma
+    self.lam = critic_config.lam
 
     self.optimizer = torch.optim.Adam(self.model.parameters(),
                                       lr = critic_config.learning_rate)

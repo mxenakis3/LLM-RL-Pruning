@@ -9,6 +9,7 @@ critic_configs = Config({
 "loss_function": "mseloss",
 "optimizer": "adam",
 "gamma": 0.99,
+"lam":0.95,
 "batch": True,
 "batch_size": 64,
 "obs_size": 8, # dimension of observation

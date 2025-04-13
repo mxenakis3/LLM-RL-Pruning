@@ -4,7 +4,7 @@ from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
 from tqdm import tqdm
 from configs.agent_configs.a_ppo_agents import critic_configs, actor_configs
 import torch.distributions as dist
-from replay_buffer import ReplayBuffer
+from replay_buffer import PPOReplayBuffer
 import numpy as np
 from collections import deque
 import random
@@ -35,13 +35,13 @@ class PPO_interaction:
         self.k = interaction_config.k # number of training epochs
 
         # Initialize memory
-        self.memory = ReplayBuffer(capacity=interaction_config.capacity, 
+        self.memory = PPOReplayBuffer(capacity=interaction_config.capacity, 
                                    batch_size=self.batch_size)
         
         # # Initialize optimizer
         # self.optimizer = torch.optim.Adam(self.policy.parameters(),
         #                                   lr = interaction_config.learning_rate)
-
+    """
     def act(self, state):
         s = torch.Tensor(state)
         with torch.no_grad():
@@ -49,6 +49,15 @@ class PPO_interaction:
         distribution = dist.Categorical(action_probs)
         a = distribution.sample().item()
         return a
+    """
+
+    def act(self, state):
+        with torch.no_grad():
+            action_probs = self.old_policy.model(state)
+        distribution = dist.Categorical(action_probs)
+        action = distribution.sample()
+        logprob = distribution.log_prob(action)
+        return action.item(), logprob.item()
     
     def update(self):
         print(f"Updating...")
@@ -60,24 +69,18 @@ class PPO_interaction:
         s_vector = torch.Tensor(np.array([t[0] for t in mem_list])) #shape: [capacity, obs_size]
         a_vector = torch.Tensor([t[1] for t in mem_list]) #shape: [capacity, 1]
         r_vector = torch.Tensor([t[2] for t in mem_list]) #shape: [capacity, 1]
-        s__vector = torch.Tensor(np.array([t[3] for t in mem_list])) #shape: [capacity, obs_size]
-        dones_vector = torch.Tensor([t[4] for t in mem_list]) #shape: [capacity, 1]
+        dones_vector = torch.Tensor([t[3] for t in mem_list]) #shape: [capacity, 1]
+        vs_vector = torch.Tensor([t[4] for t in mem_list]) #shape: [capacity, 1]
+        logprobs_vector = torch.Tensor([t[5] for t in mem_list]) #shape: [capacity, 1]
+        advantages_vector = torch.Tensor([t[6] for t in mem_list]) #shape: [capacity, 1]
+        returns_vector = torch.Tensor([t[7] for t in mem_list]) #shape: [capacity, 1]
 
-        # calculate advantages
-        with torch.no_grad():
-            vs_vector = self.critic.model(s_vector)
-            vs__vector = self.critic.model(s__vector)
-            advantages_vector = r_vector + ((self.critic.gamma*vs__vector))*(1-dones_vector) - vs_vector
-            returns_vector = advantages_vector + vs_vector
 
         # Update gradients
         for i in range(self.k):
             for idx in range(0, s_vector.shape[0], self.batch_size):
                 batch_s = s_vector[idx: idx+ self.batch_size] #shape: [batch_size,]
                 batch_a = a_vector[idx: idx+ self.batch_size]
-                batch_r = r_vector[idx: idx+ self.batch_size]
-                batch_s_ = s__vector[idx: idx+ self.batch_size]
-                batch_dones = dones_vector[idx: idx+ self.batch_size]
                 batch_advantages = advantages_vector[idx: idx+self.batch_size]
                 batch_returns = returns_vector[idx: idx+self.batch_size]
 
@@ -119,7 +122,17 @@ class PPO_interaction:
         self.memory.clear()
         self.old_policy.load_state_dict(self.policy.state_dict())
 
-
+    def compute_gae(self, rewards, values, dones, gamma, lam):
+        T = len(rewards)
+        advantages  = torch.zeros(T)
+        gae = 0
+        for t in reversed(range(T)):
+            delta = rewards[t] + (gamma*values[t+1] * (1 - dones[t])) - values[t]
+            gae = delta + gamma*lam*(1- dones[t])*gae
+            advantages[t] = gae
+        returns = advantages + torch.Tensor(values[:-1])
+        return advantages, returns
+    
     def train(self):
         """
         Uses PPO to train agent
@@ -127,20 +140,50 @@ class PPO_interaction:
         train_scores = []
         step = 0
         for e in tqdm(range(self.num_episodes)):
+            states, actions, rewards, logprobs, dones, values = [], [], [], [], [], []
+
             s, _ = self.env.reset()
+            s_tensor = torch.Tensor(s)
             done = False
             episode_score = 0
             while not done:
-                a = self.act(s)
+                # Get action and logprob associated with action (old policy)
+                a, logprob = self.act(s_tensor)
+
+                # Get value associated with state
+                v = self.critic.model(s_tensor)
+
+                # Step in environment
                 s_, r, terminated, truncated, _ = self.env.step(a)
                 done = terminated or truncated
-                self.memory.push(s, a, r, s_, done)
+
+                # Append to states
+                states.append(s)
+                actions.append(a)
+                rewards.append(r)
+                logprobs.append(logprob)
+                dones.append(done)
+                values.append(v)
+
+                # self.memory.push(s, a, r, s_, done)
                 s = s_
                 episode_score += r
                 step += 1
 
-                if step % self.update_frequency == 0:
-                    self.update()
+            # End of trajectory
+            # Append the value of the current state for the GAE calculation
+            values.append(self.critic.model(torch.Tensor(s)))
+
+            # Compute Generalized Advantage Estimation
+            advantages, returns = self.compute_gae(rewards, values, dones, self.critic.gamma, self.critic.lam)
+
+            for t in range(len(states)):
+                self.memory.push(states[t], actions[t], rewards[t], dones[t], values[t], logprobs[t], advantages[t], returns[t])
+
+            if len(self.memory) >= self.update_frequency:
+                self.update()
+        # if step % self.update_frequency == 0:
+        #     self.update()
 
             train_scores.append(episode_score)
         return train_scores, self.policy
@@ -149,10 +192,11 @@ class PPO_interaction:
         test_scores = []
         for e in range(self.testing_episodes):
             s, _ = self.env.reset()
+            s_tensor = torch.Tensor(s)
             done = False
             episode_score = 0
             while not done:
-                a = self.act(s)
+                a, logprob = self.act(s_tensor)
                 s_, r, terminated, truncated, _ = self.env.step(a)
                 done = terminated or truncated
                 episode_score += r
