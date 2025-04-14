@@ -31,11 +31,11 @@ class PPOReplayBuffer(ReplayBuffer):
     def __init__(self, capacity, batch_size):
         super().__init__(capacity, batch_size)
     
-    def push(self, state, action, reward, done, value, logprob, advantage, returns):
+    def push(self, state, action, logprob, advantage, returns):
         """
         Push an experience into the buffer, including value and logprob.
         """
-        self.buffer.append((state, action, reward, done, value, logprob, advantage, returns))
+        self.buffer.append((state, action, logprob, advantage, returns))
     
     def sample(self):
         """

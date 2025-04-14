@@ -1,12 +1,7 @@
-<<<<<<< HEAD
-\venv
-\__pychache__
-\configs\__pycache__
-=======
 venv
 __pychache__/
 *.env
 *.egg-info
 *.pyc
 .ipynb_checkpoints/
->>>>>>> 8c455c003b160882c93ae8e7753c6b5161da9b17
+configs/__pycache__/

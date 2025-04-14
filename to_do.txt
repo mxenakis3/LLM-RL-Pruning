@@ -1,0 +1,44 @@
+1) UTILS
+- Create new branch off main
+- Create a utils file at the project folder level
+- Add utility functions to the util file
+  - get environment
+  - get render mode
+
+2) PPO
+- Figure out how to introduce LLM into the notebook
+
+1) (Optional) Get tool calling in Deepseek API?
+- If this is difficult, don't worry about it
+
+2) TEXAS HOLD EM 
+- Update get_environment utils function to support texas holdem (see (1) for info about utils function)
+- Create new notebook for texas_holdem (no llm agent)
+- Tune parameters for texas_hold_em (solve the environment)
+  - Look up a good solution if one exists
+  - Try PPO first
+  - Use PPO_interaction class in the notebook
+  - See lunar lander examples for reference
+- Create LLM agent for texas hold EM
+  - Chain of thought prompting OR
+  - ReAct prompting
+  - Look at configs/agent_configs/a_lunarlander_cot_agent.py for reference on how to structure a cot prompting
+  - Ask Matheo/ go online for how to setup ReAct prompting
+- Integrate LLM agent with PPO implementation
+  - Put in same notebook as non-llm agent
+  - Save plots in the notebook
+
+3) Overcooked
+- Update get_environment utils function to support Overcooked
+- Create new notebook implementing Overcooked with PPO
+- Tune parameters
+  - Look up a good solution if one exists
+  - Try PPO first
+  - Use PPO_interaction class in the notebook
+  - See lunar lander examples for reference
+- Create LLM agent for Overcooked
+  - CoT agent will likely work best here
+- Integrate LLM agent into PPO implementation
+  - Put in same notebook
+  - Save plots in notebook
+
