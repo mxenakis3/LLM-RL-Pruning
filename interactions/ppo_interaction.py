@@ -8,11 +8,12 @@ from replay_buffer import PPOReplayBuffer
 import numpy as np
 from collections import deque
 import random
-
+from utils import get_environment, get_render_mode
 
 class PPO_interaction:
     def __init__(self, interaction_config, actor_configs, critic_configs):
-        self.env = self._get_environment(interaction_config, train=True)
+        self.env = get_environment(interaction_config, train=True)
+        self.test_env = get_environment(interaction_config, train=False)
         self.obs_size = self.env.observation_space.shape[0]
         self.action_size = self.env.action_space.n
         self.num_episodes = interaction_config.training_episodes
@@ -37,19 +38,6 @@ class PPO_interaction:
         # Initialize memory
         self.memory = PPOReplayBuffer(capacity=interaction_config.capacity, 
                                    batch_size=self.batch_size)
-        
-        # # Initialize optimizer
-        # self.optimizer = torch.optim.Adam(self.policy.parameters(),
-        #                                   lr = interaction_config.learning_rate)
-    """
-    def act(self, state):
-        s = torch.Tensor(state)
-        with torch.no_grad():
-            action_probs = self.old_policy.model(s)
-        distribution = dist.Categorical(action_probs)
-        a = distribution.sample().item()
-        return a
-    """
 
     def act(self, state):
         with torch.no_grad():
@@ -175,8 +163,6 @@ class PPO_interaction:
 
             if len(self.memory) >= self.update_frequency:
                 self.update()
-        # if step % self.update_frequency == 0:
-        #     self.update()
 
             train_scores.append(episode_score)
         return train_scores, self.policy
@@ -197,27 +183,3 @@ class PPO_interaction:
             test_scores.append(episode_score)
         return test_scores
 
-
-    def _get_render_mode(self, render_mode):
-        """
-        Helper function to get the correct render mode from config.
-        """
-        render_modes = {
-            "human": "human",
-            "none": None
-        }
-        return render_modes.get(render_mode.lower(), None)
-
-    def _get_environment(self, config, train):
-        # Define some variables that might make sense given the environment
-        if train:
-            render_mode = self._get_render_mode(config.render_mode_train)
-        else:
-            render_mode = self._get_render_mode(config.render_mode_train)
-
-        # Still defining some variables in context
-        continuous = config.continuous
-
-        # LunarLander
-        if config.env.lower() == "lunarlander-v3":
-            return gym.make("LunarLander-v3", continuous=continuous, render_mode=render_mode)

@@ -5,7 +5,6 @@ import torch.nn as nn
 import copy
 
 # Pass in config from interaction
-
 class PPOActorNetwork(nn.Module):
   def __init__(self, obs_size, action_size, actor_config):
     super().__init__()

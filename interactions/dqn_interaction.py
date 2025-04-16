@@ -3,8 +3,12 @@ import torch as torch
 import numpy as np
 import random
 from agents.dqn_agent import DeepQNetwork
-from agents import llm_chain_of_thought_agent
+# from agents import llm_chain_of_thought_agent
+from agents import tool_calling_agent_ex
 from tqdm import tqdm
+from utils import get_environment, get_render_mode
+
+
 class DQNInteraction:
 	"""
 	Generic Class for agent/environment interaction.
@@ -26,7 +30,7 @@ class DQNInteraction:
 		Uses Deep Q Learning to train agent
 		"""
 		# INIT ENVIRONMENT
-		env = self._get_environment(self.config, train=True)
+		env = get_environment(self.config, train=True)
 
 		# INIT EPSILON
 		# Initialize decay values
@@ -42,7 +46,8 @@ class DQNInteraction:
 
 		# INIT AGENTS
 		agent = DeepQNetwork(config = self.config)
-		llm_agent = llm_chain_of_thought_agent.Chain_of_Thought(config = self.llm_config)
+		# llm_agent = llm_chain_of_thought_agent.Chain_of_Thought(config = self.llm_config)
+		llm_agent = tool_calling_agent_ex.Chain_of_Thought(config = self.llm_config)
 
 		# INIT SCORE TUPLES
 		episode_scores = []
@@ -242,7 +247,7 @@ class DQNInteraction:
 		episode_scores = []
 
 		# INIT ENVIRONMENT
-		env = self._get_environment(self.config, train=False) # train == False means we are testing
+		env = get_environment(self.config, train=False) # train == False means we are testing
 
 		# TEST LOOP
 		# Outer loop = Test episode loop
@@ -292,29 +297,3 @@ class DQNInteraction:
 			"right_contact": s[7]
 		}
 		return s_as_dict
-
-	def _get_render_mode(self, render_mode):
-		"""
-		Helper function to get the correct render mode from config.
-		"""
-		render_modes = {
-			"human": "human",
-			"none": None
-		}
-		return render_modes.get(render_mode.lower(), None)
-
-	def _get_environment(self, config, train):
-		# Define some variables that might make sense given the environment
-		if train:
-			render_mode = self._get_render_mode(config.render_mode_train)
-		else:
-			render_mode = self._get_render_mode(config.render_mode_train)
-
-		# Still defining some variables in context
-		continuous = self.config.continuous
-
-		# LunarLander
-		if config.env.lower() == "lunarlander-v3":
-			return gym.make("LunarLander-v3", continuous = continuous, render_mode = render_mode)
-
-
