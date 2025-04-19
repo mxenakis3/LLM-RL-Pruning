@@ -11,7 +11,9 @@ def start_server():
         "--model", "deepseek-ai/deepseek-llm-7b-chat",
         "--host", "0.0.0.0",
         "--port", "8000",
-        "--api-key", "local-key"
+        "--api-key", "local-key",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "llama3_json",
     ]
     return subprocess.Popen(cmd)
 
@@ -28,7 +30,7 @@ def wait_for_server():
             time.sleep(2)
     raise TimeoutError("Server failed to start")
 
-def query_model(i):
+def query_model(i, tools):
     """Send sample request using OpenAI client"""
     client = OpenAI(
         base_url="http://localhost:8000/v1",
@@ -36,7 +38,8 @@ def query_model(i):
     )
     response = client.chat.completions.create(
         model="deepseek-ai/deepseek-llm-7b-chat",
-        messages=[{"role": "user", "content": f"Explain rules of Settlers of Catan"}]
+        messages=[{"role": "user", "content": f"Explain rules of Settlers of Catan"}],
+        tools=tools,
     )
     return f'[{i}]: {response.choices[0].message.content}'
 
@@ -45,13 +48,36 @@ if __name__ == "__main__":
     try:
         wait_for_server()
 
+        game_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_game_rules",
+                    "description": "Get official rules for a board game",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "game_name": {
+                                "type": "string",
+                                "description": "Name of the board game, e.g. Catan, Carcassonne"
+                            }
+                        },
+                        "required": ["game_name"]
+                    }
+                }
+            }
+        ]
+
         # Manual pool management without context manager
         executor = ThreadPoolExecutor(max_workers=4)
         futures = []
 
         # Submit all tasks concurrently
         for i in range(10):
-            future = executor.submit(query_model, i)
+            if i % 2 == 0:
+                future = executor.submit(query_model, i=i, tools=game_tools)
+            else:
+                future = executor.submit(query_model, i=i, tools=None)
             futures.append((i, future))  # Store with submission order
 
         # Wait for results sequentially in submission order
