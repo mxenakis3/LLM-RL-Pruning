@@ -65,8 +65,9 @@ class PPO_interaction:
         # Update gradients
         for i in range(self.k):
             for idx in range(0, s_vector.shape[0], self.batch_size):
-
+                #print(self.obs_size)
                 batch_s = s_vector[idx: idx+ self.batch_size] #shape: [batch_size,]
+                #print("batch_s shape:", batch_s.shape)
                 batch_a = a_vector[idx: idx+ self.batch_size]
                 batch_logprobs = logprobs_vector[idx: idx+ self.batch_size]
                 batch_advantages = advantages_vector[idx: idx+self.batch_size]
@@ -123,11 +124,12 @@ class PPO_interaction:
         for e in tqdm(range(self.num_episodes)):
             states, actions, rewards, logprobs, dones, values = [], [], [], [], [], []
 
-            s, _ = self.env.reset()
-            s_tensor = torch.Tensor(s)
+            s1, s2 = self.env.multi_reset()
+            s_tensor = torch.Tensor(s1)
             done = False
             episode_score = 0
             while not done:
+                s_tensor = torch.Tensor(s1)
                 # Get action and logprob associated with action (old policy)
                 a, logprob = self.act(s_tensor)
 
@@ -135,20 +137,21 @@ class PPO_interaction:
                 v = self.critic.model(s_tensor)
 
                 # Step in environment
-                s_, r, terminated, truncated, _ = self.env.step(a)
-                done = terminated or truncated
+                s_, r, terminated, truncated = self.env.multi_step(a, a)
+                done = terminated
+
 
                 # Append to states
-                states.append(s)
+                states.append(s1)
                 actions.append(a)
-                rewards.append(r)
+                rewards.append(r[0])
                 logprobs.append(logprob)
                 dones.append(done)
-                values.append(v)
+                values.append(v.item())
 
                 # self.memory.push(s, a, r, s_, done)
-                s = s_
-                episode_score += r
+                s = s_[0]
+                episode_score += r[0]
                 step += 1
 
             # End of trajectory
@@ -170,16 +173,16 @@ class PPO_interaction:
     def test(self):
         test_scores = []
         for e in range(self.testing_episodes):
-            s, _ = self.env.reset()
+            s, _ = self.env.multi_reset()
             s_tensor = torch.Tensor(s)
             done = False
             episode_score = 0
             while not done:
                 a, logprob = self.act(s_tensor)
-                s_, r, terminated, truncated, _ = self.env.step(a)
-                done = terminated or truncated
-                episode_score += r
-                s = s_
+                s_, r, terminated, truncated = self.env.multi_step(a, a)
+                done = terminated
+                episode_score += r[0]
+                s = s_[0]
             test_scores.append(episode_score)
         return test_scores
 

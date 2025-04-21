@@ -2,7 +2,7 @@ from configs.config_class import Config
 ppo_interaction_config = Config({
   # INTERACTION CONFIGURATIONS:
 "env": "lunarlander-v3",
-"learning_rate": .0003,
+"learning_rate": .000003,
 "c": 0.2,
 "training_episodes": 100,
 "render_mode_train": "None", # "human" plays an animation, "None" skips the animation

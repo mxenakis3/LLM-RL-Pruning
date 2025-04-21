@@ -1,8 +1,7 @@
 #!/bin/bash
-#SBATCH --ntasks 8
-#SBATCH --mem-per-cpu=3G
+#SBATCH --ntasks=8
 #SBATCH --gres=gpu:1 -C H100
-#SBATCH -t 1:00:00
+#SBATCH -t 5:00:00
 #SBATCH -J PPO
 #SBATCH -o %x.out.txt
 #SBATCH -e %x.err.txt
