@@ -1,18 +1,23 @@
 from openai import OpenAI
 import re
 import numpy as np
-# from LLM.local_LLM import get_model
+from LLM.local_LLM import get_model
 import json
 import importlib
-
+import LLM.server_LLM_pool as model_server
 
 #client = OpenAI()
-
+model_launched = False
 class Chain_of_Thought():
   def __init__(self, config):
     # Initialize client
-    self.client = OpenAI()
-    # self.client = get_model()
+    #self.client = OpenAI()
+    global model_launched
+    if not model_launched:
+      model_server.start_server()
+      model_server.wait_for_server()
+      model_launched = True
+    self.client = model_server.query_model
 
     self.system_message = config.system_message
     self.tool_schemas = config.tool_schemas
@@ -34,7 +39,8 @@ class Chain_of_Thought():
       # cot_prompt format: {"role": "user", "content": "chain of thought string"}
       self.messages.append(cot_prompt)
       # Prompt the client based on the current set of messages
-      completion = self._query()
+      #completion = self._query()
+      completion = self._call_with_tools()
       self.messages.append(completion)
     
     # WE DO NOT USE CHECK ACTION SELECTION. THIS WAS PREVIOUSLY USED TO VERIFY OUTPUT.
@@ -63,24 +69,32 @@ class Chain_of_Thought():
     return action
 
   def _query(self):
+    # JUST USE _call_with_tools WITH OR WITHOUT TOOLS
     #completion = self.client.chat.completions.create(
     #  model="gpt-4o",
     #  messages = self.messages
     #)
+    
     completion = self.client(self.messages)
     #return completion
     return {"role": "assistant", "content": completion[0].outputs[0].text}
   
   def _call_with_tools(self, tools):
     kwargs = {
-    "model": "gpt-4o-mini",
-    "messages" : self.messages
+        "model": "deepseek-ai/deepseek-llm-7b-chat",
+        "messages": self.messages,
     }
     if tools is not None:
-      kwargs["tools"] = self.tool_schemas
+        kwargs["tools"] = self.tool_schemas
     try:
-        completion = self.client.chat.completions.create(**kwargs)
-        return completion.choices[0].message.tool_calls
+        #completion = self.client.chat.completions.create(**kwargs)
+        #return completion.choices[0].message.tool_calls
+        completion = self.client(**kwargs)
+        if tools is None:
+            return {"role": "assistant", "content": completion[0].outputs[0].text}
+        return {"role": "assistant",
+                "tool_calls": completion[0].choices[0].message.tool_calls}
+
     except Exception as e:
         print(f"Exception: {e}")
      

@@ -30,7 +30,20 @@ def wait_for_server():
             time.sleep(2)
     raise TimeoutError("Server failed to start")
 
-def query_model(i, tools):
+def query_model(model, messages, tools=None):
+    """Send sample request using OpenAI client"""
+    client = OpenAI(
+        base_url="http://localhost:8000/v1",
+        api_key="local-key"
+    )
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        tools=tools,
+    )
+    return response
+
+def query_model_ex(i, tools):
     """Send sample request using OpenAI client"""
     client = OpenAI(
         base_url="http://localhost:8000/v1",
@@ -75,9 +88,9 @@ if __name__ == "__main__":
         # Submit all tasks concurrently
         for i in range(10):
             if i % 2 == 0:
-                future = executor.submit(query_model, i=i, tools=game_tools)
+                future = executor.submit(query_model_ex, i=i, tools=game_tools)
             else:
-                future = executor.submit(query_model, i=i, tools=None)
+                future = executor.submit(query_model_ex, i=i, tools=None)
             futures.append((i, future))  # Store with submission order
 
         # Wait for results sequentially in submission order
