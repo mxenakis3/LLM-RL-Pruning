@@ -14,15 +14,15 @@ class OvercookedGymWrapper(gym.Env):
         super(gym.Env, self).__init__()
 
         DEFAULT_ENV_PARAMS = {
-            "horizon": 400
+            "horizon": 1000
         }
         rew_shaping_params = {
-            "PLACEMENT_IN_POT_REW": 3,
-            "DISH_PICKUP_REWARD": 3,
-            "SOUP_PICKUP_REWARD": 5,
-            "DISH_DISP_DISTANCE_REW": 0,
-            "POT_DISTANCE_REW": 0,
-            "SOUP_DISTANCE_REW": 0,
+            "PLACEMENT_IN_POT_REW": 10,
+            "DISH_PICKUP_REWARD": 10,
+            "SOUP_PICKUP_REWARD": 10,
+            "DISH_DISP_DISTANCE_REW": 2,
+            "POT_DISTANCE_REW": 2,
+            "SOUP_DISTANCE_REW": 2,
         }
 
         self.mdp = OvercookedGridworld.from_layout_name(layout_name=layout_name, rew_shaping_params=rew_shaping_params)
@@ -34,7 +34,7 @@ class OvercookedGymWrapper(gym.Env):
         if baselines: np.random.seed(0)
 
         self.observation_space = self._setup_observation_space()
-        self.lA = len(Action.ALL_ACTIONS)
+        self.lA = len(Action.ACTION_TO_CHAR)
         self.action_space  = gym.spaces.Discrete( self.lA )
         self.ego_agent_idx = ego_agent_idx
         self.multi_reset()
@@ -42,7 +42,7 @@ class OvercookedGymWrapper(gym.Env):
     def _setup_observation_space(self):
         dummy_state = self.mdp.get_standard_start_state()
         obs_shape = self.featurize_fn(dummy_state)[0].shape
-        high = np.ones(obs_shape, dtype=np.float32) * np.inf  # max(self.mdp.soup_cooking_time, self.mdp.num_items_for_soup, 5)
+        high = np.ones(obs_shape, dtype=np.float32)  # max(self.mdp.soup_cooking_time, self.mdp.num_items_for_soup, 5)
 
         return gym.spaces.Box(-high, high, dtype=np.float64)
 
@@ -66,7 +66,7 @@ class OvercookedGymWrapper(gym.Env):
 
         # reward shaping
         rew_shape = info['shaped_r_by_agent']
-        reward = reward + rew_shape[0]
+        reward = np.sum(rew_shape) + reward
 
         #print(self.base_env.mdp.state_string(next_state))
         ob_p0, ob_p1 = self.featurize_fn(next_state)

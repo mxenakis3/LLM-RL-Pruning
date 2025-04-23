@@ -138,8 +138,7 @@ class PPO_interaction:
 
                 # Step in environment
                 s_, r, terminated, truncated = self.env.multi_step(a, a)
-                done = terminated
-
+                done = bool(np.any(terminated) or np.any(truncated))
 
                 # Append to states
                 states.append(s1)
@@ -166,7 +165,7 @@ class PPO_interaction:
 
             if len(self.memory) >= self.update_frequency:
                 self.update()
-
+            print(episode_score)
             train_scores.append(episode_score)
         return train_scores, self.policy
     
@@ -180,7 +179,7 @@ class PPO_interaction:
             while not done:
                 a, logprob = self.act(s_tensor)
                 s_, r, terminated, truncated = self.env.multi_step(a, a)
-                done = terminated
+                done = np.any(terminated) or np.any(truncated)
                 episode_score += r[0]
                 s = s_[0]
             test_scores.append(episode_score)
