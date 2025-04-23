@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --ntasks=8
-#SBATCH --gres=gpu:1 -C H100
+#SBATCH --gres=gpu:1
 #SBATCH -t 5:00:00
 #SBATCH -J PPO
 #SBATCH -o %x.out.txt
