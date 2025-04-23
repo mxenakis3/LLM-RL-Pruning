@@ -10,8 +10,8 @@ sys.path.append(parent_dir)
 
 # Now you should be able to import
 from interactions import ppo_interaction as ppo
-from configs.interaction_configs.ppo_overcooked import ppo_interaction_config
-from configs.agent_configs.a_ppo_agents import actor_configs, critic_configs
+from configs.interaction_configs.ppo_interaction_overcooked import ppo_interaction_config
+from configs.agent_configs.a_ppo_agents_overcooked import actor_configs, critic_configs
 
 
 trainer = ppo.PPO_interaction(ppo_interaction_config, actor_configs, critic_configs)

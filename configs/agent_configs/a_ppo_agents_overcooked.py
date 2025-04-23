@@ -4,7 +4,7 @@ critic_configs = Config({
 # INTERACTION CONFIGURATIONS:
 
 # AGENT CONFIGURATIONS
-"learning_rate": 5e-5,
+"learning_rate": 1e-5,
 "replay_buffer_size": 100000,
 "loss_function": "mseloss",
 "optimizer": "adam",
@@ -24,7 +24,7 @@ critic_configs = Config({
 
 actor_configs = Config({
 # AGENT CONFIGURATIONS
-"learning_rate": 5e-5,
+"learning_rate": 1e-5,
 "replay_buffer_size": 100000,
 #"loss_function": "mseloss", # We are performing gradient ascent, so we will need to fix this
 "optimizer": "adam",
@@ -36,7 +36,7 @@ actor_configs = Config({
 "hidden_layer_sizes": [1024, 1024],
 "activations": ["ReLU", "ReLU"],
 "learning_frequency": 2,
-"c": 0.2, # clipping range
+"c": 0.3, # clipping range
 "is_actor": True,
 "entropy_coef": 0.01,
 "use_shaped_reward": True

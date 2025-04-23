@@ -1,11 +1,21 @@
 ---------------------------------------
-Begin Slurm Prolog: Apr-23-2025 14:34:39
-Job ID:    2521923
+Begin Slurm Prolog: Apr-23-2025 15:51:13
+Job ID:    2522289
 User ID:   nwong70
 Account:   chbe
 Job name:  PPO
-Partition: ice-gpu
+Partition: coc-gpu
 QOS:       coc-ice
 ---------------------------------------
-Computing MotionPlanner to be saved in /home/hice1/nwong70/.conda/envs/DL_ENV/lib/python3.10/site-packages/overcooked_ai_py/data/planners/cramped_room_mp.pkl
-It took 0.03072667121887207 seconds to create mp
+---------------------------------------
+Begin Slurm Epilog: Apr-23-2025 15:51:26
+Job ID:        2522289
+User ID:       nwong70
+Account:       chbe
+Job name:      PPO
+Resources:     cpu=8,gres/gpu:l40s=1,mem=32G,node=1
+Rsrc Used:     cput=00:01:44,vmem=0,walltime=00:00:13,mem=651268K,energy_used=0
+Partition:     coc-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-004-21-0
+---------------------------------------

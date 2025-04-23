@@ -2,14 +2,14 @@ import torch as torch
 import gymnasium as gym
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
 from tqdm import tqdm
-from configs.agent_configs.a_ppo_agents import critic_configs, actor_configs
+from configs.agent_configs.a_ppo_agents_overcooked import critic_configs, actor_configs
 import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
 import numpy as np
 from collections import deque
 import random
 from utils import get_environment, get_render_mode
-
+from overcooked_ai_py.agents.agent import RandomAgent
 class PPO_interaction:
     def __init__(self, interaction_config, actor_configs, critic_configs):
         self.env = get_environment(interaction_config, train=True)
@@ -38,7 +38,6 @@ class PPO_interaction:
         # Initialize memory
         self.memory = PPOReplayBuffer(capacity=interaction_config.capacity, 
                                    batch_size=self.batch_size)
-
     def act(self, state):
         with torch.no_grad():
             action_probs = self.old_policy.model(state)
@@ -121,6 +120,7 @@ class PPO_interaction:
         """
         train_scores = []
         step = 0
+        mlp_teammate = RandomAgent()
         for e in tqdm(range(self.num_episodes)):
             states, actions, rewards, logprobs, dones, values = [], [], [], [], [], []
 
@@ -137,7 +137,10 @@ class PPO_interaction:
                 v = self.critic.model(s_tensor)
 
                 # Step in environment
-                s_, r, terminated, truncated = self.env.multi_step(a, a)
+                alt_action = mlp_teammate.action(self.env.base_env.state)[0][0]
+                s_, r, terminated, truncated = self.env.multi_step(a, alt_action)
+
+
                 done = bool(np.any(terminated) or np.any(truncated))
 
                 # Append to states

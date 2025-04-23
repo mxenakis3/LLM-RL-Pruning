@@ -14,18 +14,22 @@ class OvercookedGymWrapper(gym.Env):
         super(gym.Env, self).__init__()
 
         DEFAULT_ENV_PARAMS = {
-            "horizon": 1000
+            "horizon": 500
         }
-        rew_shaping_params = {
-            "PLACEMENT_IN_POT_REW": 10,
-            "DISH_PICKUP_REWARD": 10,
-            "SOUP_PICKUP_REWARD": 10,
-            "DISH_DISP_DISTANCE_REW": 2,
-            "POT_DISTANCE_REW": 2,
-            "SOUP_DISTANCE_REW": 2,
+        params_to_overwrite = {
+            "rew_shaping_params": {
+                "PLACEMENT_IN_POT_REW": 3,
+                "DISH_PICKUP_REWARD": 3,
+                "SOUP_PICKUP_REWARD": 5,
+                "DISH_DISP_DISTANCE_REW": 0, 
+                "POT_DISTANCE_REW": 0,
+                "SOUP_DISTANCE_REW": 0,
+            }
         }
 
-        self.mdp = OvercookedGridworld.from_layout_name(layout_name=layout_name, rew_shaping_params=rew_shaping_params)
+
+
+        self.mdp = OvercookedGridworld.from_layout_name(layout_name=layout_name, params_to_overwrite=params_to_overwrite)
         mlp = MediumLevelActionManager.from_pickle_or_compute(self.mdp, NO_COUNTERS_PARAMS, force_compute=False)
 
         self.featurize_fn = lambda x: self.mdp.featurize_state(x, mlp)
@@ -63,11 +67,15 @@ class OvercookedGymWrapper(gym.Env):
             joint_action = (alt_action, ego_action)
 
         next_state, reward, done, info = self.base_env.step(joint_action)
-
+        # try:
+        #     if(info['episode'] is not None):
+        #         print(info)
+        # except:
+        #     j = 1
         # reward shaping
         rew_shape = info['shaped_r_by_agent']
         reward = np.sum(rew_shape) + reward
-
+        #print(info)
         #print(self.base_env.mdp.state_string(next_state))
         ob_p0, ob_p1 = self.featurize_fn(next_state)
         if self.ego_agent_idx == 0:
@@ -75,7 +83,7 @@ class OvercookedGymWrapper(gym.Env):
         else:
             ego_obs, alt_obs = ob_p1, ob_p0
 
-        return (ego_obs, alt_obs), (reward, reward), done, {}#info
+        return (ego_obs, alt_obs), (reward, reward), done, {}#info#info
 
     def multi_reset(self):
         """
