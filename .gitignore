@@ -1,5 +1,5 @@
 venv
-__pychache__/
+*__pychache__/*
 *.env
 *.egg-info
 *.pyc

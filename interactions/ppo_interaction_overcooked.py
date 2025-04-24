@@ -11,7 +11,7 @@ from collections import deque
 import random
 from utils import get_environment, get_render_mode
 from overcooked_ai_py.agents.agent import RandomAgent
-import agents.llm_chain_of_thought_agent as LLMAgent
+from agents.llm_chain_of_thought_agent import Chain_of_Thought as LLMAgent
 
 
 class PPO_interaction:
@@ -164,7 +164,7 @@ class PPO_interaction:
                 # Get new values for a1, a1_logprob, a2, a2_logprob if p
                 if np.random.rand() < self.kap:
                     print(f"Entered random loop")
-                    self.llm_config.system_message["content"] = self.llm_config.system_message["content"].format({"state": self.env.state_to_json(s1)})
+                    self.llm_configs.system_message["content"] = self.llm_configs.system_message["content"].format({"state": self.env.state_to_json(s1)})
                     a1 = llm_agent() # Existing messages get cleared here
                     print(f"Agent 1 choice: {a1}")
                     a1_logprob = a1_dist.log_prob(torch.Tensor(a1))
