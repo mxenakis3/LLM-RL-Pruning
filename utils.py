@@ -1,4 +1,6 @@
 import gymnasium as gym
+from pettingzoo.classic import texas_holdem_v4
+from pettingzoo.utils.conversions import aec_to_parallel
 
 def get_render_mode(render_mode):
     """
@@ -30,3 +32,8 @@ def get_environment(config, train):
     # Use elif statements to select the environment
     if config.env.lower() == "lunarlander-v3":
         return gym.make("LunarLander-v3", continuous=continuous, render_mode=render_mode)
+    elif config.env.lower() == "texas_holdem_v4":
+        return texas_holdem_v4.env(
+            render_mode=render_mode
+        )
+
