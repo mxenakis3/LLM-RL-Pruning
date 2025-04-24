@@ -36,7 +36,8 @@ class Chain_of_Thought():
     
     # Input the last action chosen
     #action = self._check_action_selection(self.messages[-1].choices[0].message.content)
-    action = self._check_action_selection(self.messages[-1]["content"])
+    # action = self._check_action_selection(self.messages[-1]["content"])
+    action = self._check_action_selection_overcooked(self.messages[-1]["content"])
   
     # Clear messages from training step
     self.messages = []
@@ -52,6 +53,31 @@ class Chain_of_Thought():
     return {"role": "assistant", "content": completion[0].outputs[0].text}
 
   def _check_action_selection(self, action_selection):
+      # Normalize input
+      action = action_selection.strip().lower()
+
+      # Define action mappings
+      action_map = {
+          "0": 0, "nothing": 0, "no action": 0, "idle": 0,
+          "1": 1, "left": 1, "fire left": 1, "fire left engine": 1, "rotate right": 1,
+          "2": 2, "main": 2, "fire main": 2, "fire main engine": 2, "thrust": 2,
+          "3": 3, "right": 3, "fire right": 3, "fire right engine": 3, "rotate left": 3
+      }
+
+      # Check for direct mappings
+      if action in action_map:
+          return action_map[action]
+
+      # Try to extract numbers from input (e.g., "press 2" → 2)
+      match = re.search(r"\b[0-3]\b", action)
+      if match:
+          return int(match.group(0))
+
+      # Handle invalid input - return random output for now
+      print(f"Unrecognized action: {action}")
+      return np.random.randint(0, 3)
+
+  def _check_action_selection_overcooked(self, action_selection):
       # Normalize input
       action = action_selection.strip().lower()
 

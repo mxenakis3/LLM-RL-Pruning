@@ -10,8 +10,11 @@ from collections import deque
 import random
 from utils import get_environment, get_render_mode
 from overcooked_ai_py.agents.agent import RandomAgent
+import agents.llm_chain_of_thought_agent as LLMAgent
+
+
 class PPO_interaction:
-    def __init__(self, interaction_config, actor_configs, critic_configs):
+    def __init__(self, interaction_config, actor_configs, critic_configs, llm_configs):
         self.env = get_environment(interaction_config, train=True)
         self.test_env = get_environment(interaction_config, train=False)
         self.obs_size = self.env.observation_space.shape[0]
@@ -38,13 +41,28 @@ class PPO_interaction:
         # Initialize memory
         self.memory = PPOReplayBuffer(capacity=interaction_config.capacity, 
                                    batch_size=self.batch_size)
+        
+        # Initialize params for llm decay
+        self.kap_start = interaction_config.kap_start
+        self.kap_end = interaction_config.kap_end
+        self.kap_decay_episodes = interaction_config.kap_decay_episodes
+        self.kap_decay_rate = interaction_config.kap_decay_rate
+        self.kap_decay_type = interaction_config.kap_decay_type
+
+        # intialize kap
+        self.kap = self.kap_start
+
+        # Store llm configs
+        self.llm_configs = llm_configs
+
+
     def act(self, state):
         with torch.no_grad():
             action_probs = self.old_policy.model(state)
         distribution = dist.Categorical(action_probs)
         action = distribution.sample()
         logprob = distribution.log_prob(action)
-        return action.item(), logprob.item()
+        return action.item(), logprob.item(), distribution
     
     def update(self):
         # First shuffle the data in memory
@@ -119,57 +137,90 @@ class PPO_interaction:
         Uses PPO to train agent
         """
         train_scores = []
-        step = 0
+        # step = 0
         mlp_teammate = RandomAgent()
+        llm_agent = LLMAgent(self.llm_configs)
         for e in tqdm(range(self.num_episodes)):
-            states, actions, rewards, logprobs, dones, values = [], [], [], [], [], []
+
+            states_agent1, states_agent2 = [], []
+            actions_agent1, actions_agent2 = [], []
+            rewards_agent1, rewards_agent2 = [], []
+            logprobs_agent1, logprobs_agent2 = [], []
+            dones_agent1, dones_agent2 = [], []
+            values_agent1, values_agent2 = [], []
+
 
             s1, s2 = self.env.multi_reset()
-            s_tensor = torch.Tensor(s1)
+
             done = False
             episode_score = 0
             while not done:
-                s_tensor = torch.Tensor(s1)
-                # Get action and logprob associated with action (old policy)
-                a, logprob = self.act(s_tensor)
+                s1_tensor, s2_tensor = torch.Tensor(s1), torch.Tensor(s2)
 
-                # Get value associated with state
-                v = self.critic.model(s_tensor)
+                a1, a1_logprob, a1_dist = self.act(s1_tensor)
+                a2, a2_logprob, a2_dist = self.act(s2_tensor)
 
-                # Step in environment
-                alt_action = mlp_teammate.action(self.env.base_env.state)[0][0]
-                s_, r, terminated, truncated = self.env.multi_step(a, alt_action)
+                # Get new values for a1, a1_logprob, a2, a2_logprob if p
+                if np.random.rand() < self.kap:
+                    print(f"Entered random loop")
+                    self.llm_config.system_message["content"] = self.llm_config.system_message["content"].format({"state": self.env.state_to_json(s1)})
+                    a1 = llm_agent() # Existing messages get cleared here
+                    print(f"Agent 1 choice: {a1}")
+                    a1_logprob = a1_dist.log_prob(torch.Tensor(a1))
+
+                    self.llm_config.system_message["content"] = self.llm_config.system_message["content"].format({"state": self.env.state_to_json(s2)})
+                    a2 = llm_agent()
+                    print(f"Agent 2 choice: {a2}")
+                    a2_logprob = a2_dist.log_prob(torch.Tensor(a2))
 
 
-                done = bool(np.any(terminated) or np.any(truncated))
+                v1, v2 = self.critic(s1_tensor).item(), self.critic(s2_tensor).item()
+                s1_next, s2_next, r1, r2, done, _ = self.env.multi_step(a1, a2)
+
 
                 # Append to states
-                states.append(s1)
-                actions.append(a)
-                rewards.append(r[0])
-                logprobs.append(logprob)
-                dones.append(done)
-                values.append(v.item())
+                states_agent1.append(s1)
+                states_agent2.append(s2)
+                actions_agent1.append(a1)
+                actions_agent2.append(a2)
+                rewards_agent1.append(r1)
+                rewards_agent2.append(r2)
+                logprobs_agent1.append(a1_logprob)
+                logprobs_agent2.append(a2_logprob)
+                dones_agent1.append(done)
+                dones_agent2.append(done)
+                values_agent1.append(v1)
+                values_agent2.append(v2)
 
                 # self.memory.push(s, a, r, s_, done)
-                s = s_[0]
-                episode_score += r[0]
-                step += 1
+                s1, s2 = s1_next, s2_next
+                episode_score += r1
+                # step += 1
 
             # End of trajectory
             # Append the value of the current state for the GAE calculation
-            values.append(torch.tensor(0.0))
+            values_agent1.append(torch.tensor(0.0))
+            values_agent2.append(torch.Tensor(0.0))
 
             # Compute Generalized Advantage Estimation
-            advantages, returns = self.compute_gae(rewards, values, dones, self.critic.gamma, self.critic.lam)
+            advantages_agent1, returns_agent1 = self.compute_gae(rewards_agent1, values_agent1, dones_agent1, self.critic.gamma, self.critic.lam)
+            advantages_agent2, returns_agent2 = self.compute_gae(rewards_agent2, values_agent2, dones_agent2, self.critic.gamma, self.critic.lam)
 
-            for t in range(len(states)):
-                self.memory.push(states[t], actions[t], logprobs[t], advantages[t], returns[t])
+            for t in range(len(rewards_agent1)):
+                self.memory.push(states_agent1[t], actions_agent1[t], logprobs_agent1[t], advantages_agent1[t], returns_agent1[t])
+                self.memory.push(states_agent2[t], actions_agent2[t], logprobs_agent2[t], advantages_agent2[t], returns_agent2[t])
 
             if len(self.memory) >= self.update_frequency:
                 self.update()
-            print(episode_score)
+            # print(episode_score)
             train_scores.append(episode_score)
+
+            # Recompute epsilon at end of episode
+			if self.kap_decay_type.lower() == "linear":
+				self.kap = max(self.kap_end, self.kap - eps_decrement)
+			else:
+				self.kap = self.kap * self.kap_decay_rate
+
         return train_scores, self.policy
     
     def test(self):

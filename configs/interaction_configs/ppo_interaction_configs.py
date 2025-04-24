@@ -14,12 +14,17 @@ ppo_interaction_config = Config({
 "gamma": 0.99,
 "k": 4, # number of batches in each iteration of learning
 "num_epochs": 4,
-"update_frequency": 2048
+"update_frequency": 2048,
 # # Eps decay: decay for greedy vs. nongreedy exploration
 # "eps_start": 1.0,
 # "eps_end": 0.001,
 # "eps_decay_episodes": 750, # Number of episodes of decay (if linear decay)
 # "eps_decay_rate": 0.99, # rate of exponential decay (if exponential decay)
 # "decay_type": "exponential", # linear or exponential
+"kap_start": 0.7,
+"kap_end": 0.001,
+"kap_decay_episodes": 7,
+"kap_decay_rate": 0.98,
+"kap_decay_type": "linear", # linear or exponential
 })
 

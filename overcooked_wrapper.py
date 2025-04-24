@@ -1,9 +1,15 @@
-import gym
+import gymnasium as gym
 import numpy as np
 from overcooked_ai_py.mdp.actions import Action
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld
 from overcooked_ai_py.mdp.overcooked_env import OvercookedEnv
 from overcooked_ai_py.planning.planners import MediumLevelActionManager, NO_COUNTERS_PARAMS
+
+
+import json
+from typing import Dict, Any
+
+
 # Source: https://github.com/Stanford-ILIAD/PantheonRL/blob/master/overcookedgym/overcooked.py
 class OvercookedGymWrapper(gym.Env):
     def __init__(self, layout_name, ego_agent_idx=0, baselines=False):
@@ -83,7 +89,7 @@ class OvercookedGymWrapper(gym.Env):
         else:
             ego_obs, alt_obs = ob_p1, ob_p0
 
-        return (ego_obs, alt_obs), (reward, reward), done, {}#info#info
+        return ego_obs, alt_obs, reward, reward, done, {}#info#info
 
     def multi_reset(self):
         """
@@ -105,3 +111,96 @@ class OvercookedGymWrapper(gym.Env):
 
     def render(self, mode='human', close=False):
         pass
+
+    def state_to_json(self, state: np.ndarray) -> str:
+        """
+        Convert a 96-element Overcooked observation NumPy array into a structured JSON string.
+        """
+        state = np.asarray(state).flatten()
+        if state.size != 96:
+            raise ValueError(f"Expected state of length 96, got {state.size}")
+
+        # Feature definitions
+        item_names = ["onion", "tomato", "dish", "soup", "serving_area", "empty_counter"]
+        orientations = ["up", "right", "down", "left"]
+        objects = ["onion", "soup", "dish", "tomato"]
+
+        def parse_player_feats(feat: np.ndarray) -> Dict[str, Any]:
+            idx = 0
+
+            # Orientation one-hot
+            orient_vec = feat[idx:idx+4]
+            orientation = orientations[int(np.argmax(orient_vec))] if np.any(orient_vec == 1) else None
+            idx += 4
+
+            # Object held one-hot
+            obj_vec = feat[idx:idx+4]
+            obj = objects[int(np.argmax(obj_vec))] if np.any(obj_vec == 1) else None
+            idx += 4
+
+            # Distances to items
+            dists = {}
+            for name in item_names:
+                dx, dy = int(feat[idx]), int(feat[idx+1])
+                dists[name] = {"dx": dx, "dy": dy}
+                idx += 2
+
+            # Contents of closest soup
+            num_onions = int(feat[idx]); num_tomatoes = int(feat[idx+1])
+            idx += 2
+
+            # Pot features (for two pots)
+            pots = []
+            for _ in range(2):
+                exists = bool(feat[idx]); idx += 1
+
+                status_keys = ["empty", "full", "cooking", "ready"]
+                status_vals = feat[idx:idx+4]; idx += 4
+                status = {k: bool(v) for k, v in zip(status_keys, status_vals)}
+
+                num_onions_p = int(feat[idx]); num_tomatoes_p = int(feat[idx+1])
+                idx += 2
+
+                cook_time = int(feat[idx]); idx += 1
+
+                dx_p = int(feat[idx]); dy_p = int(feat[idx+1]); idx += 2
+
+                pots.append({
+                    "exists": exists,
+                    "status": status,
+                    "num_onions": num_onions_p,
+                    "num_tomatoes": num_tomatoes_p,
+                    "cook_time": cook_time,
+                    "dx": dx_p,
+                    "dy": dy_p
+                })
+
+            # Wall indicators
+            wall_dirs = ["up", "right", "down", "left"]
+            walls = {d: bool(feat[idx + i]) for i, d in enumerate(wall_dirs)}
+            idx += 4
+
+            return {
+                "orientation": orientation,
+                "holding": obj,
+                "distance_to_items": dists,
+                "closest_soup_contents": {"num_onions": num_onions, "num_tomatoes": num_tomatoes},
+                "pots": pots,
+                "walls": walls
+            }
+
+        # Split state into components
+        p0_feats = state[0:46]
+        p1_feats = state[46:92]
+        dist_to_other = {"dx": int(state[92]), "dy": int(state[93])}
+        position = {"x": int(state[94]), "y": int(state[95])}
+
+        # Build JSON
+        data = {
+            "player_0": parse_player_feats(p0_feats),
+            "player_1": parse_player_feats(p1_feats),
+            "distance_between_players": dist_to_other,
+            "player_position": position
+        }
+
+        return json.dumps(data, indent=2)
