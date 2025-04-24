@@ -1,3 +1,4 @@
+from tkinter import YES
 import torch as torch
 import gymnasium as gym
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
@@ -215,11 +216,10 @@ class PPO_interaction:
             # print(episode_score)
             train_scores.append(episode_score)
 
-            # Recompute epsilon at end of episode
-			if self.kap_decay_type.lower() == "linear":
-				self.kap = max(self.kap_end, self.kap - eps_decrement)
-			else:
-				self.kap = self.kap * self.kap_decay_rate
+            if self.kap_decay_type.lower() == "linear":
+                self.kap = max(self.kap_end, self.kap - (self.kap_start - self.kap_end / self.kap_decay_episodes))
+            else:
+                self.kap = self.kap * self.kap_decay_rate
 
         return train_scores, self.policy
     
