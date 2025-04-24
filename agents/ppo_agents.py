@@ -31,6 +31,9 @@ class PPOActorNetwork(nn.Module):
     
     return nn.Sequential(*layers)
 
+  def forward(self, state):
+    return self.model(state)
+
 
 
 class PPOCriticNetwork(nn.Module):
@@ -58,5 +61,8 @@ class PPOCriticNetwork(nn.Module):
     layers.append(nn.Linear(h_size, 1))
     
     return nn.Sequential(*layers)
+
+  def forward(self, state):
+    return self.model(state)
 
 

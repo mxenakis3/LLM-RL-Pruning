@@ -56,6 +56,8 @@ class PPO_interaction:
         # Store llm configs
         self.llm_configs = llm_configs
 
+        self.template = llm_configs.system_message["content"]
+
 
     def act(self, state):
         with torch.no_grad():
@@ -164,15 +166,19 @@ class PPO_interaction:
                 # Get new values for a1, a1_logprob, a2, a2_logprob if p
                 if np.random.rand() < self.kap:
                     print(f"Entered random loop")
-                    self.llm_configs.system_message["content"] = self.llm_configs.system_message["content"].format({"state": self.env.state_to_json(s1)})
+                    llm_agent.system_message = self.template.format(**{"state_info": self.env.state_to_json(s1)})
                     a1 = llm_agent() # Existing messages get cleared here
-                    print(f"Agent 1 choice: {a1}")
-                    a1_logprob = a1_dist.log_prob(torch.Tensor(a1))
+                    print(f"Agent 1 choice type: {type(a1)}, value: {a1}")
+                    a1_tensor = torch.tensor(a1, dtype=torch.long, device=a1_dist.logits.device)
+                    print(a1_tensor)
+                    a1_logprob = a1_dist.log_prob(a1_tensor)
 
-                    self.llm_config.system_message["content"] = self.llm_config.system_message["content"].format({"state": self.env.state_to_json(s2)})
+                    llm_agent.system_message = self.template.format(**{"state_info": self.env.state_to_json(s2)})
                     a2 = llm_agent()
-                    print(f"Agent 2 choice: {a2}")
-                    a2_logprob = a2_dist.log_prob(torch.Tensor(a2))
+                    print(f"Agent 2 choice type: {type(a2)}, value: {a2}")
+                    a2_tensor = torch.tensor(a2, dtype=torch.long, device=a2_dist.logits.device)
+                    print(a2_tensor)
+                    a2_logprob = a2_dist.log_prob(a2_tensor)
 
 
                 v1, v2 = self.critic(s1_tensor).item(), self.critic(s2_tensor).item()
