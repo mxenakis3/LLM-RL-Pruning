@@ -2,7 +2,6 @@ import torch as torch
 import gymnasium as gym
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
 from tqdm import tqdm
-from configs.agent_configs.a_ppo_agents import critic_configs, actor_configs
 import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
 import numpy as np
@@ -13,32 +12,38 @@ from torch.distributions import Categorical
 
 
 class PPO_interaction:
-    def __init__(self, interaction_config, actor_configs, critic_configs):
+    def __init__(self, interaction_config, env_configs, actor_configs, critic_configs):
         # load parallel TexasHoldem or LunarLander, etc.
-        self.env      = get_environment(interaction_config, train=True)
-        self.test_env = get_environment(interaction_config, train=False)
+        self.env      = get_environment(env_configs, train=True)
+        self.test_env = get_environment(env_configs, train=False)
 
-        self.env.reset()
-        self.agents = list(self.env.possible_agents)
+        # This variabe will be used in train, test to dispatch training to the appropriate method.
+        self.env_name = env_configs.env
 
-        # Only these are the “real” players
-        self.player_agents = [
-            a for a in self.env.possible_agents
-            if a.startswith("player")
-        ]
-        first_obs, _, _, _, _ = self.env.last()
-        first_agent = self.env.agent_selection
+        # Set up additional parameters for texas holdem
+        if self.env_name.lower() == "texas_holdem_v4":
+            self.env.reset()
+            self.agents = list(self.env.possible_agents)
 
-        obs_vec = first_obs["observation"]
-        self.obs_size = obs_vec.shape[0]
+            # Only these are the “real” players
+            self.player_agents = [
+                a for a in self.env.possible_agents
+                if a.startswith("player")
+            ]
+            first_obs, _, _, _, _ = self.env.last()
+            first_agent = self.env.agent_selection
 
-        act_space = self.env.action_space(first_agent)
-        if hasattr(act_space, "n"):
-            self.action_size = act_space.n
-        elif hasattr(act_space, "nvec"):
-            self.action_size = int(act_space.nvec[0])
-        else:
-            raise ValueError("Unsupported action space")
+            obs_vec = first_obs["observation"]
+            self.obs_size = obs_vec.shape[0]
+            print(f"self.obs_size: {self.obs_size}")
+
+            act_space = self.env.action_space(first_agent)
+            if hasattr(act_space, "n"):
+                self.action_size = act_space.n
+            elif hasattr(act_space, "nvec"):
+                self.action_size = int(act_space.nvec[0])
+            else:
+                raise ValueError("Unsupported action space")
 
 
         self.num_episodes = interaction_config.training_episodes
@@ -58,7 +63,7 @@ class PPO_interaction:
         # Initialize hyperparemeters
         self.c = interaction_config.c # clipping factor (0 <= x <= 1) for PPO
         self.batch_size = interaction_config.batch_size
-        self.k = interaction_config.k # number of training epochs
+        self.num_epochs = interaction_config.num_epochs # number of training epochs
 
         # Initialize memory
         self.memory = PPOReplayBuffer(capacity=interaction_config.capacity,
@@ -73,6 +78,9 @@ class PPO_interaction:
         return action.item(), logprob.item()
 
     def act_multiagent(self, state_vec: np.ndarray, action_mask: np.ndarray):
+        """
+        Multi-agent action for PettingZoo environments
+        """
         with torch.no_grad():
             # old_policy.model returns probabilities [batch=1, action_size]
             probs = self.old_policy.model(torch.Tensor(state_vec).unsqueeze(0))
@@ -94,6 +102,9 @@ class PPO_interaction:
         return a, dist.log_prob(torch.tensor(a)).item()
 
     def update(self):
+        """
+        Update Actor and Critic networks in PPO.
+        """
         # First shuffle the data in memory
         actor_losses, critic_losses = [], []
         mem_list = list(self.memory.buffer)
@@ -110,7 +121,7 @@ class PPO_interaction:
         advantages_vector = (advantages_vector - advantages_vector.mean()) / (advantages_vector.std() + 1e-8)
 
         # Update gradients
-        for i in range(self.k):
+        for i in range(self.num_epochs):
             for idx in range(0, s_vector.shape[0], self.batch_size):
 
                 batch_s = s_vector[idx: idx+ self.batch_size] #shape: [batch_size,]
@@ -157,6 +168,13 @@ class PPO_interaction:
         self.old_policy.load_state_dict(self.policy.state_dict())
 
     def compute_gae(self, rewards, values, dones, gamma, lam):
+        """
+        Computes the Generalized Advantage Estimate for the TD targets used in update. 
+        The "advantage" for a given action selection is the difference between the expected value of taking that action given a particular state, and the expected value of selecting a random action for that state.
+
+        The GAE computes this as a geometrically weighted average over the expected rewards from all future states. This is a common practice in PPO implementations.
+
+        """
         T = len(rewards)
         advantages  = torch.zeros(T)
         gae = 0
@@ -167,18 +185,31 @@ class PPO_interaction:
         returns = advantages + torch.Tensor(values[:-1])
         return advantages, returns
 
+    def train(self):
+        """
+        Read environment name, and dispatch training to correct method.
+        Inputs: None
+        Outputs: None
+        """
+        if self.env.lower() == "texas_holdem_v4":
+            self.train_multiagent()
+        elif self.env.lower() == "lunarlander-v3":
+            self.train_single_agent()
+
+
     def train_multiagent(self):
         train_scores = []
 
-        for ep in range(self.num_episodes):
+        for ep in tqdm(range(self.num_episodes)):
             # Buffers for this HAND
             states, actions, logps = [], [], []
             rewards, dones, values = [], [], []
+
             self.env.reset()
             agent_returns = {agent: 0.0 for agent in self.player_agents}
 
-
             for agent in self.env.agent_iter():
+                print(f"Type agent: {type(agent)}")
                 obs, reward, termination, truncation, info = self.env.last()
 
                 if termination or truncation:
@@ -230,26 +261,28 @@ class PPO_interaction:
         return train_scores, self.policy
 
     def test_multiagent(self):
-        scores = []
-        for _ in range(self.testing_episodes):
-            total_r = 0
+        # maintain a value for each agent
+
+        agent_rewards = {agent: [0] for agent in self.player_agents}
+        
+        for _ in tqdm(range(self.testing_episodes)):
             self.test_env.reset()
+            print(self.test_env.agent_iter())
             for agent in self.test_env.agent_iter():
                 obs, reward, termination, truncation, info = self.test_env.last()
                 if termination or truncation:
                     action = None
                 else:
                     state_vec   = obs["observation"]
-                    action_mask = obs["action_mask"]
-                    a, _        = self.act_multiagent(state_vec, action_mask)
+                    action_mask = obs["action_mask"] # Rules you can take based on the current iteration (ie. you can't bet after you fold) 
+                    a, _        = self.act_multiagent(state_vec, action_mask) # ACtion for one agent. Named as such to distinguish from lunarlander 'act' function
                     action = a
                 self.test_env.step(action)
-                total_r += reward
-            scores.append(total_r)
-        return scores
+                agent_rewards[agent].append(reward + agent_rewards[agent][-1]) 
+        return agent_rewards
 
 
-    def train(self):
+    def train_single_agent(self):
         """
         Uses PPO to train agent
         """
@@ -302,7 +335,7 @@ class PPO_interaction:
             train_scores.append(episode_score)
         return train_scores, self.policy
 
-    def test(self):
+    def test_single_agent(self):
         test_scores = []
         for e in range(self.testing_episodes):
             s, _ = self.env.reset()
