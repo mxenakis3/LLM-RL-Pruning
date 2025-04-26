@@ -9,7 +9,7 @@ from collections import deque
 import random
 from utils import get_environment, get_render_mode
 from torch.distributions import Categorical
-
+from agents import leducholdem_rule_models as rule_model
 
 class PPO_interaction:
     def __init__(self, interaction_config, env_configs, actor_configs, critic_configs):
@@ -34,8 +34,6 @@ class PPO_interaction:
             first_agent = self.env.agent_selection
 
             obs_vec = first_obs["observation"]
-            self.obs_size = obs_vec.shape[0]
-            print(f"self.obs_size: {self.obs_size}")
 
             act_space = self.env.action_space(first_agent)
             if hasattr(act_space, "n"):
@@ -44,6 +42,10 @@ class PPO_interaction:
                 self.action_size = int(act_space.nvec[0])
             else:
                 raise ValueError("Unsupported action space")
+        
+            self.obs_size = obs_vec.shape[0] + self.action_size
+            print(f"self obs size: {self.obs_size}")
+
 
 
         self.num_episodes = interaction_config.training_episodes
@@ -174,6 +176,7 @@ class PPO_interaction:
 
         The GAE computes this as a geometrically weighted average over the expected rewards from all future states. This is a common practice in PPO implementations.
 
+        len(values) = len(rewards) + 1
         """
         T = len(rewards)
         advantages  = torch.zeros(T)
@@ -198,68 +201,169 @@ class PPO_interaction:
 
 
     def train_multiagent(self):
+        """
+        Training PPO agent against one random agent (for now)
+        Returns:
+            - train_scores: The PPO agent's reward after each hand
+            - policy: The trained network type: (PPONetwork) (see agents/PPONetwork)
+        """
         train_scores = []
-
+        # # for debugging:
+        # moves_dict = {0: 'call', 1: 'raise', 2: 'fold', 3: 'check'}
         for ep in tqdm(range(self.num_episodes)):
-            # Buffers for this HAND
-            states, actions, logps = [], [], []
-            rewards, dones, values = [], [], []
-
+            # print(f"NEW EPISODE")
             self.env.reset()
-            agent_returns = {agent: 0.0 for agent in self.player_agents}
 
-            for agent in self.env.agent_iter():
-                print(f"Type agent: {type(agent)}")
-                obs, reward, termination, truncation, info = self.env.last()
+            # Store trajectories for each agent in dictionary (needs to be serialized for GAE calculation)
+            agent_trajectories = {agent: {"states": [], "actions":[], "logps":[], "rewards": [], "dones":[], "values":[]} for agent in self.player_agents}
+
+            # We will one-hot encode the action of the last agent. At start, no one has acted, so last_action = 0
+            last_action = np.array([0]*self.action_size)
+
+            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information. 
+                # NOTE: If an agent folds, then self.env.agent_iter() iterates from agent_0 to agent_1
+
+                obs, reward, termination, truncation, info = self.env.last() # info from last step. 
+                # print(f"{agent} self.env.last(): Terminated: {termination}, Reward: {reward}, last ation: {last_action}")
 
                 if termination or truncation:
-                    action = None
-                    values.append(0.0)
+                    # print(f"{agent}: last reward: {reward}")
+                    agent_trajectories[agent]["values"].append(0.0) # A terminal state is reached, and v=0
+                    agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
+                    action = None 
+                    last_action = np.array([0]*self.action_size)
+                    self.env.step(action)
+                    
+                    summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
+                    # print(f"Last round someone folded. {summary}")
+                    continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
+
                 else:
                     state_vec   = obs["observation"]
+                    state_vec = np.concatenate((state_vec, last_action), axis=0)
                     action_mask = obs["action_mask"]
-
                     v = self.critic.model(torch.Tensor(state_vec).unsqueeze(0)).item()
 
-                    a, lp = self.act_multiagent(state_vec, action_mask)
+                    if agent == 'player_0':
+                        action, lp = self.act_multiagent(state_vec, action_mask)
+                    else:
+                        # Get action probabilities from the policy network (even if choosing randomly)
+                        with torch.no_grad():
+                            action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
+                            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+                        
+                        # Apply action mask (set invalid actions to 0 probability)
+                        masked_probs = action_probs * action_mask
+                        masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                        
+                        # Randomly sample an action from valid ones
+                        valid_indices = np.where(action_mask == 1)[0]
+                        action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                        
+                        # Compute log probability of the chosen action
+                        lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+                    
+                    last_action = np.eye(self.action_size)[action]
+                    agent_trajectories[agent]["states"].append(state_vec)
+                    agent_trajectories[agent]["actions"].append(action)
+                    agent_trajectories[agent]["logps"].append(lp)
+                    agent_trajectories[agent]["values"].append(v)
+                    agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
+                    agent_trajectories[agent]["dones"].append(False)
 
-                    states.append(state_vec)
-                    actions.append(a)
-                    logps.append(lp)
-                    values.append(v)
+                    # print(f"{agent} takes action {moves_dict[action]}. New 'last_action' was {last_action}")
 
-                    action = a
+                summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
+                # print(f"After action: {summary}")
+                self.env.step(action) # Automatically terminates when an agent folds
 
-                self.env.step(action)
+            # Truncate the dones and rewards from the start state (we need to stagger rewards for PPO)
+            for agent, traj in agent_trajectories.items():
+                if len(traj["actions"]) > 0:
+                    traj["rewards"] = traj["rewards"][1:] # If the agent got to act, rewards are staggered. 
+                    # ie. if player_0 folds on turn 1, agent_1 does not act. Therefore they do not learn.
+                    # player_0's rewards[0] is the reward conferred on reset, which==0. Clip this reward so that the rewards come 'after' the action (needs to work with GAE)
+                    # if player_0 did not fold on first turn, player_1 had a chance to act, but his first reward comes from 
+                    advantages, returns = self.compute_gae(
+                        traj["rewards"], traj["values"], traj["dones"],
+                        self.critic.gamma, self.critic.lam
+                    )
+                    # Now add this to memory
+                    for s, a, lp, adv, ret in zip(traj["states"], traj["actions"], traj["logps"], advantages, returns):
+                        self.memory.push(s, a, lp, adv.item(), ret.item())
+              
 
-                rewards.append(reward)
-                dones.append(termination or truncation)
-
-                if agent in agent_returns:
-                    agent_returns[agent] += reward
-
-
-            values.append(0.0)
-
-            advantages, returns = self.compute_gae(
-                rewards, values, dones,
-                self.critic.gamma, self.critic.lam
-            )
-
-            for s, a, lp, adv, ret in zip(states, actions, logps, advantages, returns):
-                self.memory.push(s, a, lp, adv.item(), ret.item())
-
+            train_scores.append(agent_trajectories["player_0"]["rewards"][-1]) # Append the payoff of the current hand to train scores
             if len(self.memory) >= self.update_frequency:
                 self.update()
 
-
-            r0 = agent_returns[self.player_agents[0]]
-            r1 = agent_returns[self.player_agents[1]]
-            train_scores.append((r0, r1))
-            # print(f"[Episode {ep:03d}] P0={r0:.2f}, P1={r1:.2f}")
-
         return train_scores, self.policy
 
+    def test_multiagent(self, policy):
+        """
+        Testing PPO agent against one random agent (for now)
+        Returns:
+            - test_scores: The PPO agent's reward after each hand
+            - policy: The trained network type: (PPONetwork) (see agents/PPONetwork)
+        """
+        test_scores = []
+        for ep in tqdm(range(self.testing_episodes)):
+            # print(f"NEW EPISODE")
+            self.env.reset()
+
+            # Store trajectories for each agent in dictionary (needs to be serialized for GAE calculation)
+            agent_trajectories = {agent: {"states": [], "actions":[], "logps":[], "rewards": [], "dones":[], "values":[]} for agent in self.player_agents}
+
+            # We will one-hot encode the action of the last agent. At start, no one has acted, so last_action = 0
+            last_action = np.array([0]*self.action_size)
+
+            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information. 
+                # NOTE: If an agent folds, then self.env.agent_iter() iterates from agent_0 to agent_1
+
+                obs, reward, termination, truncation, info = self.env.last() # info from last step. 
+                # print(f"{agent} self.env.last(): Terminated: {termination}, Reward: {reward}, last ation: {last_action}")
+
+                if termination or truncation:
+                    # print(f"{agent}: last reward: {reward}")
+                    agent_trajectories[agent]["values"].append(0.0) # A terminal state is reached, and v=0
+                    agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
+                    action = None 
+                    last_action = np.array([0]*self.action_size)
+                    self.env.step(action)
+                    continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
+
+                else:
+                    state_vec   = obs["observation"]
+                    state_vec = np.concatenate((state_vec, last_action), axis=0)
+                    action_mask = obs["action_mask"]
+
+                    if agent == 'player_0':
+                        action, lp = self.act_multiagent(state_vec, action_mask)
+                    else:
+                        # Get action probabilities from the policy network (even if choosing randomly)
+                        with torch.no_grad():
+                            action_logits = policy.model(torch.Tensor(state_vec).unsqueeze(0))
+                            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+                        
+                        # Apply action mask (set invalid actions to 0 probability)
+                        masked_probs = action_probs * action_mask
+                        masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                        
+                        # Randomly sample an action from valid ones
+                        valid_indices = np.where(action_mask == 1)[0]
+                        action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                    
+                    last_action = np.eye(self.action_size)[action]
+                    agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
+
+                self.env.step(action) # Automatically terminates when an agent folds            
+
+            test_scores.append(agent_trajectories["player_0"]["rewards"][-1]) # Append the payoff of the current hand to train scores
+
+        return test_scores
+
+
+    """
     def test_multiagent(self):
         # maintain a value for each agent
 
@@ -267,9 +371,9 @@ class PPO_interaction:
         
         for _ in tqdm(range(self.testing_episodes)):
             self.test_env.reset()
-            print(self.test_env.agent_iter())
-            for agent in self.test_env.agent_iter():
-                obs, reward, termination, truncation, info = self.test_env.last()
+            # print(self.test_env.agent_iter())
+            for agent in self.test_env.agent_iter(): # Agent gives the name of the agent
+                obs, reward, termination, truncation, info = self.test_env.last() # Get the information from the last step for the agent
                 if termination or truncation:
                     action = None
                 else:
@@ -280,7 +384,7 @@ class PPO_interaction:
                 self.test_env.step(action)
                 agent_rewards[agent].append(reward + agent_rewards[agent][-1]) 
         return agent_rewards
-
+    """
 
     def train_single_agent(self):
         """

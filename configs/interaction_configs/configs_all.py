@@ -11,8 +11,8 @@ texas_holdem_config = Config({
 
 ppo_interaction_config_texas = Config({
   # INTERACTION CONFIGURATIONS:
-"training_episodes": 5,
-"testing_episodes": 5,
+"training_episodes": 2000,
+"testing_episodes": 100,
 "c": 0.2, # Loss function clipping coefficient
 "batch_size":64, # Size of batch for SGD in update method.
 "capacity": 2048, # Size of experience tuple (s, a, r, s_, ...) memory 
