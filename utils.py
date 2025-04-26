@@ -1,6 +1,14 @@
 import gymnasium as gym
 from pettingzoo.classic import texas_holdem_v4
+from pettingzoo.classic.rlcard_envs import texas_holdem
 from pettingzoo.utils.conversions import aec_to_parallel
+
+def decay_prob(prob, decay_type, prob_start, prob_end, prob_decay_episodes, prob_decay_rate):
+    if decay_type.lower() == "linear":
+        prob = max(prob_end, (prob - (prob_start - prob_end)/(prob_decay_episodes)))
+    else:
+        prob = max(prob_end, (prob * prob_decay_rate))
+    return prob
 
 def get_render_mode(render_mode):
     """
@@ -37,4 +45,5 @@ def get_environment(config, train):
         return texas_holdem_v4.env(
             render_mode=render_mode
         )
-
+    elif config.env.lower() == 'texas_holdem':
+        return texas_holdem
