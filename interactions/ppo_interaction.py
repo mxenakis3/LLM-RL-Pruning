@@ -6,7 +6,7 @@ import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
 import numpy as np
 import random
-from utils import get_environment, get_render_mode, decay_prob
+from utils import get_environment, get_render_mode, decay_prob, texas_holdem_state_to_json
 from torch.distributions import Categorical
 
 class PPO_interaction:
@@ -70,7 +70,8 @@ class PPO_interaction:
                                    batch_size=self.batch_size)
         
         # Init LLM
-        self.llmagent = Chain_of_Thought(llm_configs)
+        self.llm_agent = Chain_of_Thought(config=llm_configs)
+        self.llm_system_message = self.llm_configs.system_message["content"] # This string needs to provide information about the state
 
         # LLM decay parameters
         self.kap_start, self.kap_end  = interaction_configs.kap_start, interaction_configs.kap_end
@@ -208,6 +209,35 @@ class PPO_interaction:
         elif self.env.lower() == "lunarlander-v3":
             self.train_single_agent()
 
+    def get_llm_action(self, state_vec, action_mask=None, moves_dict=None):
+        """
+        Returns action and logprob given state and legal actions
+        
+        """
+        with torch.no_grad():
+            action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
+            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+
+            # Update state message
+            if action_mask:
+                # Get set of legal moves
+                legal_actions = [moves_dict[i] for i, mask in action_mask if mask == 1]
+
+                # Apply action mask (set invalid actions to 0 probability)
+                masked_probs = action_probs * action_mask
+                masked_probs = masked_probs / masked_probs.sum()  # Renormalize           
+
+                # Sample action from llm. (Assumes Texas Holdem is the current environment)
+                state_message = self.llm_system_message.format({"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
+                self.llm_agent.messages.append(state_message)
+                action = self.llm_agent() # Automatically clears messages
+                lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+
+            else:
+                state_message = self.llm_system_message.format({"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
+                action = np.random.randint(0, self.action_size - 1) # Dummy for now
+                lp = np.log(action_probs[action] + 1e-10)
+
 
     def train_multiagent(self):
         """
@@ -218,7 +248,7 @@ class PPO_interaction:
         """
         train_scores = []
         # # for debugging:
-        # moves_dict = {0: 'call', 1: 'raise', 2: 'fold', 3: 'check'}
+        moves_dict = {0: 'call', 1: 'raise', 2: 'fold', 3: 'check'}
         for ep in tqdm(range(self.num_episodes)):
             # print(f"NEW EPISODE")
             self.env.reset()
@@ -257,7 +287,7 @@ class PPO_interaction:
                         # With probability kap, select action with llm agent
                         p = np.random.uniform(0, 1)
                         if p <= self.kap:
-                            action = ??
+                            action, lp = self.get_llm_action(state_vec, action_mask, moves_dict)
                         else:
                             action, lp = self.act_multiagent(state_vec, action_mask)
 

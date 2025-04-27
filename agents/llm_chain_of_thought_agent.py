@@ -9,7 +9,7 @@ class Chain_of_Thought():
   def __init__(self, config):
     # Initialize client
     # self.client = OpenAI()
-    # self.client = get_model()
+    self.client = get_model()
 
     self.system_message = config.system_message
 
