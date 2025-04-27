@@ -3,10 +3,11 @@ import torch as torch
 import numpy as np
 import random
 from agents.dqn_agent import DeepQNetwork
-# from agents import llm_chain_of_thought_agent
-from agents import tool_calling_agent_ex
+from agents.llm_chain_of_thought_agent import Chain_of_Thought
+# from agents.tool_calling_agent_ex import Chain_of_Thought
+# from agents.tool_calling_agent_ex import Chain_of_Thought
 from tqdm import tqdm
-from utils import get_environment, get_render_mode
+from utils import decay_prob, get_environment, get_render_mode, decay_prob
 
 
 class DQNInteraction:
@@ -14,123 +15,130 @@ class DQNInteraction:
 	Generic Class for agent/environment interaction.
 	Now supports both LunarLander and a PettingZoo
 	"""
-	def __init__(self, dqn_ll_config, cot_ll_config): # Hard code this as the config file.
-		self.config = dqn_ll_config # Instance of config class.
-		self.llm_config = cot_ll_config
+	def __init__(self, interaction_configs, agent_configs, env_configs, llm_configs): # Hard code this as the config file.
+		# Import environment
+		self.env_name = env_configs.env
+		self.train_env = get_environment(env_configs, train=True)
+		self.test_env = get_environment(env_configs, train=False)
+
+		# load interaction configs
+		self.training_episodes, self.testing_episodes = interaction_configs.training_episodes, interaction_configs.testing_episodes
+		self.episode_length = interaction_configs.episode_length
+
+		# load parameters for epsilon
+		self.eps_start, self.eps_end  = interaction_configs.eps_start, interaction_configs.eps_end
+		self.eps_decay_episodes, self.eps_decay_rate = interaction_configs.eps_decay_episodes, interaction_configs.eps_decay_rate
+		self.eps_decay_type = interaction_configs.eps_decay_type
+
+		# init epsilon
+		self.eps = self.eps_start
+
+		# LLM decay parameters
+		self.kap_start, self.kap_end  = interaction_configs.kap_start, interaction_configs.kap_end
+		self.kap_decay_episodes, self.kap_decay_rate = interaction_configs.kap_decay_episodes, interaction_configs.kap_decay_rate
+		self.kap_decay_type = interaction_configs.kap_decay_type
+
+		# init kap
+		self.kap = self.kap_start
+
+		# Initialize agents
+		self.agent = DeepQNetwork(config = agent_configs)
+		self.llm_configs = llm_configs
+		self.llm_agent = Chain_of_Thought(config = llm_configs)
+		self.llm_system_message = self.llm_configs.system_message["content"]
+
 
 	def train(self):
 		"""Dispatch training to the correct method based on the environment."""
-		if self.config.env.lower() == "lunarlander-v3":
+		print(f"env name: {self.env_name.lower()}")
+		if self.env_name.lower() == "lunarlander-v3":
 			return self.train_lunarlander()
 		else:
 			return self.train_pettingzoo()
+
 
 	def train_lunarlander(self):
 		"""
 		Uses Deep Q Learning to train agent
 		"""
 		# INIT ENVIRONMENT
-		env = get_environment(self.config, train=True)
-
-		# INIT EPSILON
-		# Initialize decay values
-		epsilon = self.config.eps_start
-		kappa = self.config.kap_start
-
-		# If linear decay, calculate decrement for epsilon, kappa decay
-		if self.config.decay_type.lower() == "linear":
-			eps_decrement = (self.config.eps_start - self.config.eps_end) / self.config.eps_decay_episodes
-
-		if self.config.kap_decay_type.lower() == "linear":
-			kap_decrement = (self.config.kap_start - self.config.kap_end) / self.config.kap_decay_episodes
-
-		# INIT AGENTS
-		agent = DeepQNetwork(config = self.config)
-		# llm_agent = llm_chain_of_thought_agent.Chain_of_Thought(config = self.llm_config)
-		llm_agent = tool_calling_agent_ex.Chain_of_Thought(config = self.llm_config)
-
 		# INIT SCORE TUPLES
 		episode_scores = []
 
 		# TRAINING LOOP
+		print(f"Entered lunarlander")
 		# Outer loop = Training episode loop
-		for e in tqdm(range(self.config.training_episodes)):
+		for e in tqdm(range(self.training_episodes)):
 
 			# Reset the environment to generate the first state 's'
-			s, info = env.reset()
+			s, info = self.train_env.reset()
 			done = False
 			score = 0
 
 			# Run episode until terminal state is reached
 			while not done:
 				# Using epsilon greedy, decide between greedy and non-greedy action
-				if np.random.rand() < epsilon:
+				if np.random.rand() < self.eps:
 					# using kappa-greedy, decide between LLM and random
-					if np.random.rand() < kappa:
+					if np.random.rand() < self.kap:
 						# Fill the values of the current state into a dictionary readable by the LLM agent
 						s_as_dict =	self._get_state_dict(s)
-						self.llm_config.system_message["content"] = self.llm_config.system_message["content"].format(**s_as_dict)
-						llm_agent.messages.append(self.llm_config.system_message)
-						a = llm_agent()
+						message = self.llm_system_message.format(**s_as_dict)
+						self.llm_agent.messages.append({"role": "system", "content": message})
+						a = self.llm_agent()
 					else:
 						# Random action
-						a = env.action_space.sample()
+						a = self.train_env.action_space.sample()
 				else:
 					# Choose greedy action
 					# Ensure the state is correctly formatted (e.g., tensor, reshaped)
 					s_tensor = torch.tensor(s, dtype=torch.float32).unsqueeze(0)	# Add batch dimension if needed
 					with torch.no_grad():	# No need to track gradients for action selection
-							q_values = agent.model(s_tensor)	# Get Q-values for each action
+							q_values = self.agent.model(s_tensor)	# Get Q-values for each action
 					a = torch.argmax(q_values).item()	# Choose action with the highest Q-value
 
 				# Take action
-				s_, r, terminated, truncated, info = env.step(a)
+				s_, r, terminated, truncated, info = self.train_env.step(a)
 				done = terminated or truncated
 
 				# Increment score
 				score += r
 
 				# Append experience to agent's memory buffer
-				agent.replay_buffer.push(s, a, r, s_, done)
+				self.agent.replay_buffer.push(s, a, r, s_, done)
 
 				# Close-out step
 				s = s_
 
 				# Increment step counter for agent
-				agent.step_counter += 1
+				self.agent.step_counter += 1
 
 				# Learn and update target network if needed:
-				if agent.step_counter % agent.learning_frequency == 0:
-					agent.learn()
+				if self.agent.step_counter % self.agent.learning_frequency == 0:
+					self.agent.learn()
 
-				if agent.step_counter % agent.target_update_frequency == 0:
-					agent.update_target_net()
+				if self.agent.step_counter % self.agent.target_update_frequency == 0:
+					self.agent.update_target_net()
 
 
 			# Append episode score (for plots)
 			episode_scores.append(score)
 
 			# Recompute epsilon
-			if self.config.decay_type.lower() == "linear":
-				epsilon = max(self.config.eps_end, epsilon - eps_decrement)
-			else:
-				epsilon = epsilon * self.config.eps_decay_rate
-
-			# Recompute kappa
-			if self.config.kap_decay_type.lower() == "linear":
-				kappa = max(self.config.kap_end, kappa - kap_decrement)
-			else:
-				kappa = kappa * self.config.kap_decay_rate
-
+			# prob, decay_type, prob_start, prob_end, prob_decay_episodes, prob_decay_rate
+			self.eps = decay_prob(self.kap, self.eps_decay_type, self.eps_start, self.eps_end, self.eps_decay_episodes, self.eps_decay_rate)
+			self.kap = decay_prob(self.eps, self.kap_decay_type, self.kap_start, self.kap_end, self.kap_decay_episodes, self.kap_decay_rate)
 
 		# Close pygame window
-		env.close()
+		self.train_env.close()
 
 		# Episode scores: score for each training episode
 		# Agent: trained agent
-		return episode_scores, agent
+		return episode_scores, self.agent
 
-	def train_pettingzoo(self, env_constructor, fixed_agent = ""):
+	def train_pettingzoo(self, env_constructor=None, fixed_agent = ""):
+		if not env_constructor:
+			return
 		env = env_constructor()
 		env.reset()
 		agents = env.agents
@@ -239,6 +247,10 @@ class DQNInteraction:
 		return episode_rewards_all
 
 	def test(self, agent):
+		if self.env_name.lower() == 'lunarlander-v3':
+			test_lunarlander(agent)
+
+	def test_lunarlander(self, agent):
 		"""
 		Uses trained model to run training episodes
 		"""
@@ -247,11 +259,11 @@ class DQNInteraction:
 		episode_scores = []
 
 		# INIT ENVIRONMENT
-		env = get_environment(self.config, train=False) # train == False means we are testing
+		env = self.test_env
 
 		# TEST LOOP
 		# Outer loop = Test episode loop
-		for e in tqdm(range(self.config.testing_episodes)):
+		for e in tqdm(range(self.testing_episodes)):
 
 			# Reset the environment to generate the first state 's'
 			s, info = env.reset()

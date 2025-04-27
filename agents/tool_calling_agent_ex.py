@@ -35,7 +35,7 @@ class Chain_of_Thought():
 
     # Assume system_message has already been appended in interaction...
     # Iterate through chain of thought
-    for cot_prompt in self.cot_prompts: 
+    for cot_prompt in self.cot_prompts[:-1]: 
       # cot_prompt format: {"role": "user", "content": "chain of thought string"}
       self.messages.append(cot_prompt)
       # Prompt the client based on the current set of messages
@@ -43,15 +43,23 @@ class Chain_of_Thought():
       completion = self._call_with_tools()
       self.messages.append(completion)
     
+    self.messages.append(self.cot_prompts[-1])
     # WE DO NOT USE CHECK ACTION SELECTION. THIS WAS PREVIOUSLY USED TO VERIFY OUTPUT.
     # self.messages NOW INCLUDES THE FULL CHAIN OF THOUGHT PROCESS FOR THE AGENT.
 
     # action = self._check_action_selection(self.messages[-1]["content"])
 
     # NEW FOR TOOL CALLING: HAVE THE AGENT CALL THE TOOL
-    tool_call = self._call_with_tools()
+    tool_call = self._call_with_tools(self.tool_schemas)
+
+    print(f" last message: {self.messages[-1]}")
+    print(tool_call)
+
     fn_name = tool_call[0].function.name
     fn_args = json.loads(tool_call[0].function.arguments)
+
+    print(f" last message: {self.messages[-1]}")
+    print(tool_call)
 
     # Run the function
     method = getattr(self.functions_module, fn_name, None)
@@ -79,7 +87,7 @@ class Chain_of_Thought():
     #return completion
     return {"role": "assistant", "content": completion[0].outputs[0].text}
   
-  def _call_with_tools(self, tools):
+  def _call_with_tools(self, tools=None):
     kwargs = {
         "model": "deepseek-ai/deepseek-llm-7b-chat",
         "messages": self.messages,
@@ -90,6 +98,7 @@ class Chain_of_Thought():
         #completion = self.client.chat.completions.create(**kwargs)
         #return completion.choices[0].message.tool_calls
         completion = self.client(**kwargs)
+        print(completion)
         if tools is None:
             return {"role": "assistant", "content": completion[0].outputs[0].text}
         return {"role": "assistant",
