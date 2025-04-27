@@ -16,6 +16,8 @@ class PPOActorNetwork(nn.Module):
 
     self.gamma = actor_config.gamma
 
+    self.gradient_clipping = actor_config.gradient_clipping
+
     self.optimizer = torch.optim.Adam(self.model.parameters(),
                                           lr = actor_config.learning_rate)
 
@@ -44,6 +46,8 @@ class PPOCriticNetwork(nn.Module):
 
     self.gamma = critic_config.gamma
     self.lam = critic_config.lam
+
+    self.gradient_clipping = critic_config.gradient_clipping
 
     self.optimizer = torch.optim.Adam(self.model.parameters(),
                                       lr = critic_config.learning_rate)

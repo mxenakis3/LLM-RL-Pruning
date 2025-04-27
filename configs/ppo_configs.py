@@ -36,7 +36,8 @@ actor_configs_texas = Config({
 "output_size": 4, # dimension of action space
 "hidden_layer_sizes": [256, 256],
 "activations": ["ReLU", "ReLU"],
-"is_actor": True # Leave as True: distinguishes actor and critic networks
+"is_actor": True, # Leave as True: distinguishes actor and critic networks
+"gradient_clipping": 0.5
 })
 
 critic_configs_texas = Config({
@@ -52,7 +53,8 @@ critic_configs_texas = Config({
 "output_size": 1, # scalar output
 "hidden_layer_sizes": [256, 256],
 "activations": ["ReLU", "ReLU"],
-"is_actor": False # Leave as false: distinguishes actor and critic networks
+"is_actor": False, # Leave as false: distinguishes actor and critic networks,
+"gradient_clipping": 0.5
 })
 
 # c: a range over [0.75, 0.0]

@@ -220,11 +220,15 @@ class PPO_interaction:
                 # Update critic
                 self.critic.optimizer.zero_grad()
                 critic_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.model.parameters(), max_norm=self.critic.gradient_clipping)
+
                 self.critic.optimizer.step()
 
                 # Update actor
                 self.policy.optimizer.zero_grad()
                 actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.model.parameters(), max_norm=self.actor.gradient_clipping)
+
                 self.policy.optimizer.step()
 
                 actor_losses.append(actor_loss.item())
