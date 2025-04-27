@@ -4,7 +4,8 @@ import numpy as np
 import random
 from agents.dqn_agent import DeepQNetwork
 from agents.llm_chain_of_thought_agent import Chain_of_Thought
-# from agents import tool_calling_agent_ex
+# from agents.tool_calling_agent_ex import Chain_of_Thought
+# from agents.tool_calling_agent_ex import Chain_of_Thought
 from tqdm import tqdm
 from utils import decay_prob, get_environment, get_render_mode, decay_prob
 
@@ -27,7 +28,7 @@ class DQNInteraction:
 		# load parameters for epsilon
 		self.eps_start, self.eps_end  = interaction_configs.eps_start, interaction_configs.eps_end
 		self.eps_decay_episodes, self.eps_decay_rate = interaction_configs.eps_decay_episodes, interaction_configs.eps_decay_rate
-		self.decay_type = interaction_configs.eps_decay_type
+		self.eps_decay_type = interaction_configs.eps_decay_type
 
 		# init epsilon
 		self.eps = self.eps_start
@@ -35,23 +36,25 @@ class DQNInteraction:
 		# LLM decay parameters
 		self.kap_start, self.kap_end  = interaction_configs.kap_start, interaction_configs.kap_end
 		self.kap_decay_episodes, self.kap_decay_rate = interaction_configs.kap_decay_episodes, interaction_configs.kap_decay_rate
-		self.decay_type = interaction_configs.kap_decay_type
+		self.kap_decay_type = interaction_configs.kap_decay_type
 
 		# init kap
 		self.kap = self.kap_start
 
 		# Initialize agents
 		self.agent = DeepQNetwork(config = agent_configs)
+		self.llm_configs = llm_configs
 		self.llm_agent = Chain_of_Thought(config = llm_configs)
 		self.llm_system_message = self.llm_configs.system_message["content"]
 
 
 	def train(self):
 		"""Dispatch training to the correct method based on the environment."""
+		print(f"env name: {self.env_name.lower()}")
 		if self.env_name.lower() == "lunarlander-v3":
-			self.train_lunarlander()
+			return self.train_lunarlander()
 		else:
-			self.train_pettingzoo()
+			return self.train_pettingzoo()
 
 
 	def train_lunarlander(self):
@@ -63,6 +66,7 @@ class DQNInteraction:
 		episode_scores = []
 
 		# TRAINING LOOP
+		print(f"Entered lunarlander")
 		# Outer loop = Training episode loop
 		for e in tqdm(range(self.training_episodes)):
 
@@ -80,7 +84,7 @@ class DQNInteraction:
 						# Fill the values of the current state into a dictionary readable by the LLM agent
 						s_as_dict =	self._get_state_dict(s)
 						message = self.llm_system_message.format(**s_as_dict)
-						self.llm_agent.messages.append(message)
+						self.llm_agent.messages.append({"role": "system", "content": message})
 						a = self.llm_agent()
 					else:
 						# Random action
@@ -121,8 +125,9 @@ class DQNInteraction:
 			episode_scores.append(score)
 
 			# Recompute epsilon
-			self.eps = decay_prob(self.eps_decay_type, self.eps_start, self.eps_end, self.eps_decay_episodes, self.eps_decay_rate)
-			self.kap = decay_prob(self.kap_decay_type, self.kap_start, self.kap_end, self.kap_decay_episodes, self.kap_decay_rate)
+			# prob, decay_type, prob_start, prob_end, prob_decay_episodes, prob_decay_rate
+			self.eps = decay_prob(self.kap, self.eps_decay_type, self.eps_start, self.eps_end, self.eps_decay_episodes, self.eps_decay_rate)
+			self.kap = decay_prob(self.eps, self.kap_decay_type, self.kap_start, self.kap_end, self.kap_decay_episodes, self.kap_decay_rate)
 
 		# Close pygame window
 		self.train_env.close()
@@ -131,7 +136,9 @@ class DQNInteraction:
 		# Agent: trained agent
 		return episode_scores, self.agent
 
-	def train_pettingzoo(self, env_constructor, fixed_agent = ""):
+	def train_pettingzoo(self, env_constructor=None, fixed_agent = ""):
+		if not env_constructor:
+			return
 		env = env_constructor()
 		env.reset()
 		agents = env.agents
@@ -240,7 +247,7 @@ class DQNInteraction:
 		return episode_rewards_all
 
 	def test(self, agent):
-		if self.env_name.lower() == 'lunarlander_v3':
+		if self.env_name.lower() == 'lunarlander-v3':
 			test_lunarlander(agent)
 
 	def test_lunarlander(self, agent):

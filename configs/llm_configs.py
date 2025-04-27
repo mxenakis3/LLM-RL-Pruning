@@ -1,8 +1,9 @@
 from configs.config_class import Config
 
-lunar_llm_agent_configs = Config(
+lunar_llm_agent_configs =  Config(
   {
     # Configs will go here
+    "module_name": f"configs.agent_configs.lunar_tool_calling_configs",
     "system_message" : {"role": "system", "content": """
       You are an agent playing the LunarLander reinforcement learning game. 
 
@@ -47,10 +48,82 @@ lunar_llm_agent_configs = Config(
        "role": "user", "content": "If you are not at a safe landing angle, which of the actions available could you take to adjust your orientation?",
        "role": "user", "content": "based on the above conversation, respond with the index corresponding to the action you want to take: \n 0: do nothing \n 1: fire left orientation engine \n 2: fire main engine \n 3: fire right orientation engine"
       }
-    ]
+    ],
 
+  "tool_schemas" : [
+  {
+  "type": "function",
+  "function": {
+    "name" : "do_nothing",
+    "description": """
+        Do nothing in the current state.
+    """,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        },
+      },
+      "required": [], # No required parameters. By default, this has to be the list of ALL the parameters.
+      "additionalProperties": False
+    },
+    "strict": True
+  },
+  
+  
+  {
+  "type": "function",
+  "function": {
+    "name" : "fire_left_orientation_engine",
+    "description": """
+        Fires the left orientation engine in the current state.
+    """,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        },
+      },
+      "required": [], # No required parameters. By default, this has to be the list of ALL the parameters.
+      "additionalProperties": False
+    },
+    "strict": True
+  },
+
+{
+  "type": "function",
+  "function": {
+    "name" : "fire_main_engine",
+    "description": """
+        Fires the main engine in the current state.
+    """,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        },
+      },
+      "required": [], # No required parameters. By default, this has to be the list of ALL the parameters.
+      "additionalProperties": False
+    },
+    "strict": True
+  },
+
+{
+  "type": "function",
+  "function": {
+    "name" : "fire_right_orientation_engine",
+    "description": """
+        Fires the right orientation engine in the current state.
+    """,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        },
+      },
+      "required": [], # No required parameters. By default, this has to be the list of ALL the parameters.
+      "additionalProperties": False
+    },
+    "strict": True
+  }]
     
-
   }
 )
 

@@ -3,7 +3,7 @@ from configs.config_class import Config
 
 env_lunar_lander_config = Config({
   # INTERACTION CONFIGURATIONS:
-"env": "lunarlander_v3",
+"env": "lunarlander-v3",
 "render_mode_train": "None", # "human" plays an animation, "None" skips the animation
 "render_mode_test": "None", # "human" plays an animation, "None" skips the animation
 "continuous": False, # Discrete, or continuous simulation -- OpenAI parameter})
@@ -43,3 +43,13 @@ agent_example_lunarlander = Config({
 "target_update_frequency": 64, # The number of steps we take before we reset the target network to have the values as the current network
 "learning_frequency": 4 # Number of steps before training
 })
+
+# Variables to change:
+# learning rate
+# gamma
+# hidden layer sizes
+# Target Network (True/ False)
+# learning frequency
+
+# First step - tune without llm
+# second step - add in llm
