@@ -1,6 +1,6 @@
 import torch as torch
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
-from agents.llm_chain_of_thought_agent import Chain_of_Thought
+# from agents.llm_chain_of_thought_agent import Chain_of_Thought
 from tqdm import tqdm
 import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
@@ -73,6 +73,7 @@ class PPO_interaction:
         # Initialize hyperparemeters
         self.c = interaction_configs.c # clipping factor (0 <= x <= 1) for PPO
         self.batch_size = interaction_configs.batch_size
+        self.bot_type = interaction_configs.bot_type
         self.num_epochs = interaction_configs.num_epochs # number of training epochs
 
         # Initialize memory
@@ -81,7 +82,7 @@ class PPO_interaction:
 
         # Init LLM
         self.llm_configs = llm_configs
-        self.llm_agent = Chain_of_Thought(config=llm_configs)
+        # self.llm_agent = Chain_of_Thought(config=llm_configs)
         self.llm_system_message = self.llm_configs.system_message["content"] # This string needs to provide information about the state
 
         # LLM decay parameters
@@ -123,6 +124,52 @@ class PPO_interaction:
         dist = Categorical(masked)
         a = dist.sample().item()
         return a, dist.log_prob(torch.tensor(a, dtype=torch.float32, device=self.device)).item()
+
+    def make_raw_state(self, agent_name: str, state_vec, action_mask):
+        """Return the (raw_obs, raw_legal_actions) pair for a PettingZoo agent.
+
+        Works for all RLCard-backed PettingZoo games, regardless of wrapper depth.
+        """
+        pid = 0 if agent_name == "player_0" else 1   # RLCard seat id
+
+        # Dive until we locate an object that has .get_state()
+        obj = self.env.unwrapped          # start at the raw_env
+        for attr in ("env", "game"):      # typical nesting chain
+            if hasattr(obj, "get_state"):
+                break
+            if hasattr(obj, attr):
+                obj = getattr(obj, attr)
+
+        if not hasattr(obj, "get_state"):
+            raise RuntimeError("Unable to locate RLCard environment with get_state()")
+
+        with torch.no_grad():
+            # old_policy.model returns probabilities [batch=1, action_size]
+            probs = self.old_policy.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0))
+            probs = probs.squeeze(0)  # -> [action_size]
+
+        mask = torch.tensor(action_mask, dtype=torch.float32, device=self.device)  # float tensor of 0/1
+        masked = probs * mask             # zero out illegal
+        total = masked.sum().item()
+
+        if total == 0.0:
+            # fallback: uniform over legal moves
+            legal_count = mask.sum().item()
+            masked = mask / legal_count
+        else:
+            masked = masked / total
+
+        dist = Categorical(masked)
+        a = dist.sample().item()
+        lp = dist.log_prob(torch.tensor(a, dtype=torch.float32, device=self.device)).item()
+
+        state = obj.get_state(pid)        # RLCard’s own dict
+
+        return {
+            "raw_obs":           state["raw_obs"],
+            "raw_legal_actions": state["raw_legal_actions"],
+        }, lp
+
 
     def update(self):
         """
@@ -294,32 +341,34 @@ class PPO_interaction:
                     continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
 
                 else:
-                    state_vec   = obs["observation"]
+                    state_vec = obs["observation"]
                     state_vec = np.concatenate((state_vec, last_action), axis=0)
                     action_mask = obs["action_mask"]
                     v = self.critic.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0)).item()
                     if agent == 'player_0':
                         action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
-                        raw_state = self._make_raw_state(agent)
-                        str_action, _ = self.opponent_agent.eval_step(raw_state)
-                        action = self._str2id[str_action]
-                        lp = 0.0
-                        # # Get action probabilities from the policy network (even if choosing randomly)
-                        # with torch.no_grad():
-                        #     action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
-                        #     action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+                        if self.bot_type == "heuristic":
+                            raw_state, lp = self.make_raw_state(agent, state_vec, action_mask)
+                            str_action, _= self.opponent_agent.eval_step(raw_state)
+                            # print(str_action)
+                            action = self._str2id[str_action]
+                        elif self.bot_type == "random":
+                            # Get action probabilities from the policy network (even if choosing randomly)
+                            with torch.no_grad():
+                                action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
-                        # # Apply action mask (set invalid actions to 0 probability)
-                        # masked_probs = action_probs * action_mask
-                        # masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                            # Apply action mask (set invalid actions to 0 probability)
+                            masked_probs = action_probs * action_mask
+                            masked_probs = masked_probs / masked_probs.sum()  # Renormalize
 
-                        # # Randomly sample an action from valid ones
-                        # valid_indices = np.where(action_mask == 1)[0]
-                        # action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                            # Randomly sample an action from valid ones
+                            valid_indices = np.where(action_mask == 1)[0]
+                            action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
 
-                        # # Compute log probability of the chosen action
-                        # lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+                            # Compute log probability of the chosen action
+                            lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
 
                     last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["states"].append(state_vec)
@@ -359,30 +408,6 @@ class PPO_interaction:
                 self.update()
 
         return train_scores, self.policy
-
-    def _make_raw_state(self, agent_name: str):
-        """Return the (raw_obs, raw_legal_actions) pair for a PettingZoo agent.
-
-        Works for all RLCard-backed PettingZoo games, regardless of wrapper depth.
-        """
-        pid = 0 if agent_name == "player_0" else 1   # RLCard seat id
-
-        # Dive until we locate an object that has .get_state()
-        obj = self.env.unwrapped          # start at the raw_env
-        for attr in ("env", "game"):      # typical nesting chain
-            if hasattr(obj, "get_state"):
-                break
-            if hasattr(obj, attr):
-                obj = getattr(obj, attr)
-
-        if not hasattr(obj, "get_state"):
-            raise RuntimeError("Unable to locate RLCard environment with get_state()")
-
-        state = obj.get_state(pid)        # RLCard’s own dict
-        return {
-            "raw_obs":           state["raw_obs"],
-            "raw_legal_actions": state["raw_legal_actions"],
-        }
 
     def test_multiagent(self, policy):
         """
@@ -425,21 +450,24 @@ class PPO_interaction:
                     if agent == 'player_0':
                         action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
-                        raw_state = self._make_raw_state(info)
-                        str_action, _ = self.opponent_agent.eval_step(raw_state)
-                        action = self._str2id[str_action]
-                        # Get action probabilities from the policy network (even if choosing randomly)
-                        # with torch.no_grad():
-                        #     action_logits = policy.model(torch.tensor(state_vec).unsqueeze(0))
-                        #     action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
-                        # # Apply action mask (set invalid actions to 0 probability)
-                        # masked_probs = action_probs * action_mask
-                        # masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                        if self.bot_type == "heuristic":
+                            raw_state = self.make_raw_state(info)
+                            str_action, _ = self.opponent_agent.eval_step(raw_state)
+                            action = self._str2id[str_action]
+                        elif self.bot_type == "random":
+                            # Get action probabilities from the policy network (even if choosing randomly)
+                            with torch.no_grad():
+                                action_logits = policy.model(torch.tensor(state_vec).unsqueeze(0))
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
-                        # # Randomly sample an action from valid ones
-                        # valid_indices = np.where(action_mask == 1)[0]
-                        # action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                            # Apply action mask (set invalid actions to 0 probability)
+                            masked_probs = action_probs * action_mask
+                            masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+
+                            # Randomly sample an action from valid ones
+                            valid_indices = np.where(action_mask == 1)[0]
+                            action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
 
                     last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round

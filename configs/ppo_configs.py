@@ -13,6 +13,7 @@ ppo_interaction_config_texas = Config({
   # INTERACTION CONFIGURATIONS:
 "training_episodes": 2000000,
 "testing_episodes": 2000,
+"bot_type": "heuristic", # "heuristic" or "random"
 "c": 0.1, # Loss function clipping coefficient
 "batch_size":512, # Size of batch for SGD in update method.
 "capacity": 20000, # Size of experience tuple (s, a, r, s_, ...) memory
