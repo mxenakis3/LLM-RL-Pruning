@@ -206,9 +206,9 @@ class PPO_interaction:
         Outputs: None
         """
         if self.env.lower() == "texas_holdem_v4":
-            self.train_multiagent()
+            return self.train_multiagent()
         elif self.env.lower() == "lunarlander-v3":
-            self.train_single_agent()
+            return self.train_single_agent()
 
     def get_llm_action(self, state_vec, action_mask=None, moves_dict=None):
         """
@@ -231,7 +231,7 @@ class PPO_interaction:
 
                 # Sample action from llm. (Assumes Texas Holdem is the current environment)
                 state_message = self.llm_system_message.format(**{"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
-                self.llm_agent.messages.append(state_message)
+                self.llm_agent.messages.append({"role":"system", "content": state_message})
                 action = self.llm_agent() # Automatically clears messages
                 lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
 
@@ -239,6 +239,8 @@ class PPO_interaction:
                 state_message = self.llm_system_message.format(**{"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
                 action = np.random.randint(0, self.action_size - 1) # Dummy for now
                 lp = np.log(action_probs[action] + 1e-10)
+            
+            return action, lp
 
 
     def train_multiagent(self):
