@@ -227,7 +227,7 @@ class PPO_interaction:
                 # Update actor
                 self.policy.optimizer.zero_grad()
                 actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.model.parameters(), max_norm=self.actor.gradient_clipping)
+                torch.nn.utils.clip_grad_norm_(self.policy.model.parameters(), max_norm=self.policy.gradient_clipping)
 
                 self.policy.optimizer.step()
 
@@ -360,7 +360,7 @@ class PPO_interaction:
                         elif self.bot_type == "random":
                             # Get action probabilities from the policy network (even if choosing randomly)
                             with torch.no_grad():
-                                action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
+                                action_logits = self.policy.model(torch.tensor(state_vec, dtype=torch.float32).unsqueeze(0))
                                 action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
                             # Apply action mask (set invalid actions to 0 probability)
@@ -456,13 +456,13 @@ class PPO_interaction:
                     else:
 
                         if self.bot_type == "heuristic":
-                            raw_state = self.make_raw_state(info)
+                            raw_state, lp = self.make_raw_state(info, state_vec, action_mask)
                             str_action, _ = self.opponent_agent.eval_step(raw_state)
                             action = self._str2id[str_action]
                         elif self.bot_type == "random":
                             # Get action probabilities from the policy network (even if choosing randomly)
                             with torch.no_grad():
-                                action_logits = policy.model(torch.tensor(state_vec).unsqueeze(0))
+                                action_logits = policy.model(torch.tensor(state_vec,dtype=torch.float32).unsqueeze(0))
                                 action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
                             # Apply action mask (set invalid actions to 0 probability)
