@@ -1,18 +1,17 @@
 import torch as torch
-import gymnasium as gym
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
+from agents.llm_chain_of_thought_agent import Chain_of_Thought
 from tqdm import tqdm
 import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
 import numpy as np
-from collections import deque
 import random
-from utils import get_environment
+from utils import get_environment, get_render_mode, decay_prob, texas_holdem_state_to_json
 from torch.distributions import Categorical
 from rlcard.models.limitholdem_rule_models import LimitholdemRuleAgentV1
 
 class PPO_interaction:
-    def __init__(self, interaction_config, env_configs, actor_configs, critic_configs):
+    def __init__(self, interaction_configs, env_configs, actor_configs, critic_configs, llm_configs):
         # load parallel TexasHoldem or LunarLander, etc.
         self.env      = get_environment(env_configs, train=True)
         self.test_env = get_environment(env_configs, train=False)
@@ -57,9 +56,9 @@ class PPO_interaction:
 
             self._str2id = {"call": 0, "raise": 1, "fold": 2, "check": 3}
 
-        self.num_episodes = interaction_config.training_episodes
-        self.testing_episodes = interaction_config.testing_episodes
-        self.update_frequency = interaction_config.update_frequency
+        self.num_episodes = interaction_configs.training_episodes
+        self.testing_episodes = interaction_configs.testing_episodes
+        self.update_frequency = interaction_configs.update_frequency
         self.critic = PPOCriticNetwork(obs_size = self.obs_size,
                                  action_size=self.action_size,
                                  critic_config=critic_configs).to(self.device)
@@ -72,13 +71,26 @@ class PPO_interaction:
         self.old_policy.load_state_dict(self.policy.state_dict())
 
         # Initialize hyperparemeters
-        self.c = interaction_config.c # clipping factor (0 <= x <= 1) for PPO
-        self.batch_size = interaction_config.batch_size
-        self.num_epochs = interaction_config.num_epochs # number of training epochs
+        self.c = interaction_configs.c # clipping factor (0 <= x <= 1) for PPO
+        self.batch_size = interaction_configs.batch_size
+        self.num_epochs = interaction_configs.num_epochs # number of training epochs
 
         # Initialize memory
-        self.memory = PPOReplayBuffer(capacity=interaction_config.capacity,
+        self.memory = PPOReplayBuffer(capacity=interaction_configs.capacity,
                                    batch_size=self.batch_size)
+
+        # Init LLM
+        self.llm_configs = llm_configs
+        self.llm_agent = Chain_of_Thought(config=llm_configs)
+        self.llm_system_message = self.llm_configs.system_message["content"] # This string needs to provide information about the state
+
+        # LLM decay parameters
+        self.kap_start, self.kap_end  = interaction_configs.kap_start, interaction_configs.kap_end
+        self.kap_decay_episodes, self.kap_decay_rate = interaction_configs.kap_decay_episodes, interaction_configs.kap_decay_rate
+        self.kap_decay_type = interaction_configs.kap_decay_type
+
+        # init kap
+        self.kap = self.kap_start
 
     def act(self, state):
         with torch.no_grad():
@@ -204,9 +216,41 @@ class PPO_interaction:
         Outputs: None
         """
         if self.env.lower() == "texas_holdem_v4":
-            self.train_multiagent()
+            return self.train_multiagent()
         elif self.env.lower() == "lunarlander-v3":
-            self.train_single_agent()
+            return self.train_single_agent()
+
+    def get_llm_action(self, state_vec, action_mask=None, moves_dict=None):
+        """
+        Returns action and logprob given state and legal actions
+
+        """
+        with torch.no_grad():
+            action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
+            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+
+            # Update state message
+            if action_mask is not None:
+                # Get set of legal moves
+                print(type(action_mask))
+                legal_actions = [moves_dict[i] for i, mask in enumerate(action_mask) if mask == 1]
+
+                # Apply action mask (set invalid actions to 0 probability)
+                masked_probs = action_probs * action_mask
+                masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+
+                # Sample action from llm. (Assumes Texas Holdem is the current environment)
+                state_message = self.llm_system_message.format(**{"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
+                self.llm_agent.messages.append({"role":"system", "content": state_message})
+                action = self.llm_agent() # Automatically clears messages
+                lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+
+            else:
+                state_message = self.llm_system_message.format(**{"state" : texas_holdem_state_to_json(state_vec), "legal_actions": legal_actions})
+                action = np.random.randint(0, self.action_size - 1) # Dummy for now
+                lp = np.log(action_probs[action] + 1e-10)
+
+            return action, lp
 
 
     def train_multiagent(self):
@@ -218,7 +262,7 @@ class PPO_interaction:
         """
         train_scores = []
         # # for debugging:
-        # moves_dict = {0: 'call', 1: 'raise', 2: 'fold', 3: 'check'}
+        moves_dict = {0: 'call', 1: 'raise', 2: 'fold', 3: 'check'}
         for ep in tqdm(range(self.num_episodes)):
             # print(f"NEW EPISODE")
             self.env.reset()
@@ -244,6 +288,8 @@ class PPO_interaction:
                     self.env.step(action)
 
                     summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
+
+                    # summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
                     # print(f"Last round someone folded. {summary}")
                     continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
 
@@ -258,10 +304,10 @@ class PPO_interaction:
                         raw_state = self._make_raw_state(agent)
                         str_action, _ = self.opponent_agent.eval_step(raw_state)
                         action = self._str2id[str_action]
-                        lp = 0.0          # dummy – we don’t learn from opponent moves
+                        lp = 0.0
                         # # Get action probabilities from the policy network (even if choosing randomly)
                         # with torch.no_grad():
-                        #     action_logits = self.policy.model(torch.tensor(state_vec).unsqueeze(0))
+                        #     action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
                         #     action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
 
                         # # Apply action mask (set invalid actions to 0 probability)
@@ -275,7 +321,7 @@ class PPO_interaction:
                         # # Compute log probability of the chosen action
                         # lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
 
-                    # last_action = np.eye(self.action_size)[action]
+                    last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["states"].append(state_vec)
                     agent_trajectories[agent]["actions"].append(action)
                     agent_trajectories[agent]["logps"].append(lp)
@@ -285,7 +331,7 @@ class PPO_interaction:
 
                     # print(f"{agent} takes action {moves_dict[action]}. New 'last_action' was {last_action}")
 
-                summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
+                # summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
                 # print(f"After action: {summary}")
                 self.env.step(action) # Automatically terminates when an agent folds
 
@@ -306,6 +352,9 @@ class PPO_interaction:
 
 
             train_scores.append(agent_trajectories["player_0"]["rewards"][-1]) # Append the payoff of the current hand to train scores
+
+            self.kap = decay_prob(self.kap, self.kap_decay_type, self.kap_start, self.kap_end, self.kap_decay_episodes, self.kap_decay_rate) # decay kap
+
             if len(self.memory) >= self.update_frequency:
                 self.update()
 
@@ -427,7 +476,7 @@ class PPO_interaction:
 
     def train_single_agent(self):
         """
-        Uses PPO to train agent
+        Uses PPO to train gymnasium agent (LunarLander for now)
         """
         train_scores = []
         step = 0
