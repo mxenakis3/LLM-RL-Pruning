@@ -3,6 +3,7 @@ from pettingzoo.classic import texas_holdem_v4
 from pettingzoo.classic.rlcard_envs import texas_holdem
 from pettingzoo.utils.conversions import aec_to_parallel
 import json
+import numpy as np
 
 def decay_prob(prob, decay_type, prob_start, prob_end, prob_decay_episodes, prob_decay_rate):
     if decay_type.lower() == "linear":
