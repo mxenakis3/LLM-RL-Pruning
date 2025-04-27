@@ -7,9 +7,9 @@ from replay_buffer import PPOReplayBuffer
 import numpy as np
 from collections import deque
 import random
-from utils import get_environment, get_render_mode
+from utils import get_environment
 from torch.distributions import Categorical
-from agents import leducholdem_rule_models as rule_model
+from rlcard.models.limitholdem_rule_models import LimitholdemRuleAgentV1
 
 class PPO_interaction:
     def __init__(self, interaction_config, env_configs, actor_configs, critic_configs):
@@ -19,6 +19,12 @@ class PPO_interaction:
 
         # This variabe will be used in train, test to dispatch training to the appropriate method.
         self.env_name = env_configs.env
+
+        self.device = (
+            torch.device("cuda")
+            if torch.cuda.is_available() else torch.device("cpu")
+        )
+        print("🖥  Using device:", self.device)
 
         # Set up additional parameters for texas holdem
         if self.env_name.lower() == "texas_holdem_v4":
@@ -42,24 +48,27 @@ class PPO_interaction:
                 self.action_size = int(act_space.nvec[0])
             else:
                 raise ValueError("Unsupported action space")
-        
+
             self.obs_size = obs_vec.shape[0] + self.action_size
             print(f"self obs size: {self.obs_size}")
 
+            self.opponent_agent = LimitholdemRuleAgentV1()   # frozen “skillful” bot
+            self.opponent_agent.use_raw = False              # expects vector obs
 
+            self._str2id = {"call": 0, "raise": 1, "fold": 2, "check": 3}
 
         self.num_episodes = interaction_config.training_episodes
         self.testing_episodes = interaction_config.testing_episodes
         self.update_frequency = interaction_config.update_frequency
         self.critic = PPOCriticNetwork(obs_size = self.obs_size,
                                  action_size=self.action_size,
-                                 critic_config=critic_configs)
+                                 critic_config=critic_configs).to(self.device)
         self.policy = PPOActorNetwork(obs_size = self.obs_size,
                                  action_size=self.action_size,
-                                 actor_config=actor_configs)
+                                 actor_config=actor_configs).to(self.device)
         self.old_policy = PPOActorNetwork(obs_size = self.obs_size,
                                  action_size=self.action_size,
-                                 actor_config=actor_configs)
+                                 actor_config=actor_configs).to(self.device)
         self.old_policy.load_state_dict(self.policy.state_dict())
 
         # Initialize hyperparemeters
@@ -85,10 +94,10 @@ class PPO_interaction:
         """
         with torch.no_grad():
             # old_policy.model returns probabilities [batch=1, action_size]
-            probs = self.old_policy.model(torch.Tensor(state_vec).unsqueeze(0))
+            probs = self.old_policy.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0))
             probs = probs.squeeze(0)  # -> [action_size]
 
-        mask = torch.Tensor(action_mask)  # float tensor of 0/1
+        mask = torch.tensor(action_mask, dtype=torch.float32, device=self.device)  # float tensor of 0/1
         masked = probs * mask             # zero out illegal
         total = masked.sum().item()
 
@@ -101,7 +110,7 @@ class PPO_interaction:
 
         dist = Categorical(masked)
         a = dist.sample().item()
-        return a, dist.log_prob(torch.tensor(a)).item()
+        return a, dist.log_prob(torch.tensor(a, dtype=torch.float32, device=self.device)).item()
 
     def update(self):
         """
@@ -113,11 +122,11 @@ class PPO_interaction:
         random.shuffle(mem_list) # shuffled list of tuples. s, s_ are numpy ndarrays, a, r, dones are floats or bools.
 
         # Get vectors for states, actions, rewards, s_,  dones etc.
-        s_vector = torch.Tensor(np.array([t[0] for t in mem_list])) #shape: [capacity, obs_size]
-        a_vector = torch.Tensor([t[1] for t in mem_list]) #shape: [capacity, 1]
-        logprobs_vector = torch.Tensor([t[2] for t in mem_list]) #shape: [capacity, 1]
-        advantages_vector = torch.Tensor([t[3] for t in mem_list]) #shape: [capacity, 1]
-        returns_vector = torch.Tensor([t[4] for t in mem_list]) #shape: [capacity, 1]
+        s_vector = torch.tensor(np.array([t[0] for t in mem_list]), dtype=torch.float32, device=self.device) #shape: [capacity, obs_size]
+        a_vector = torch.tensor([t[1] for t in mem_list], dtype=torch.float32, device=self.device) #shape: [capacity, 1]
+        logprobs_vector = torch.tensor([t[2] for t in mem_list], dtype=torch.float32, device=self.device) #shape: [capacity, 1]
+        advantages_vector = torch.tensor([t[3] for t in mem_list], dtype=torch.float32, device=self.device) #shape: [capacity, 1]
+        returns_vector = torch.tensor([t[4] for t in mem_list], dtype=torch.float32, device=self.device) #shape: [capacity, 1]
 
         # Normalize advantages vector
         advantages_vector = (advantages_vector - advantages_vector.mean()) / (advantages_vector.std() + 1e-8)
@@ -171,7 +180,7 @@ class PPO_interaction:
 
     def compute_gae(self, rewards, values, dones, gamma, lam):
         """
-        Computes the Generalized Advantage Estimate for the TD targets used in update. 
+        Computes the Generalized Advantage Estimate for the TD targets used in update.
         The "advantage" for a given action selection is the difference between the expected value of taking that action given a particular state, and the expected value of selecting a random action for that state.
 
         The GAE computes this as a geometrically weighted average over the expected rewards from all future states. This is a common practice in PPO implementations.
@@ -179,13 +188,13 @@ class PPO_interaction:
         len(values) = len(rewards) + 1
         """
         T = len(rewards)
-        advantages  = torch.zeros(T)
+        advantages  = torch.zeros(T, device=self.device)
         gae = 0
         for t in reversed(range(T)):
             delta = rewards[t] + (gamma*values[t+1] * (1 - dones[t])) - values[t]
             gae = delta + gamma*lam*(1- dones[t])*gae
             advantages[t] = gae
-        returns = advantages + torch.Tensor(values[:-1])
+        returns = advantages + torch.tensor(values[:-1], dtype=torch.float32, device=self.device)
         return advantages, returns
 
     def train(self):
@@ -220,20 +229,20 @@ class PPO_interaction:
             # We will one-hot encode the action of the last agent. At start, no one has acted, so last_action = 0
             last_action = np.array([0]*self.action_size)
 
-            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information. 
+            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information.
                 # NOTE: If an agent folds, then self.env.agent_iter() iterates from agent_0 to agent_1
 
-                obs, reward, termination, truncation, info = self.env.last() # info from last step. 
+                obs, reward, termination, truncation, info = self.env.last() # info from last step.
                 # print(f"{agent} self.env.last(): Terminated: {termination}, Reward: {reward}, last ation: {last_action}")
 
                 if termination or truncation:
                     # print(f"{agent}: last reward: {reward}")
                     agent_trajectories[agent]["values"].append(0.0) # A terminal state is reached, and v=0
                     agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
-                    action = None 
+                    action = None
                     last_action = np.array([0]*self.action_size)
                     self.env.step(action)
-                    
+
                     summary = {agent: {key: len(value) for key, value in data.items()} for agent, data in agent_trajectories.items()}
                     # print(f"Last round someone folded. {summary}")
                     continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
@@ -242,28 +251,31 @@ class PPO_interaction:
                     state_vec   = obs["observation"]
                     state_vec = np.concatenate((state_vec, last_action), axis=0)
                     action_mask = obs["action_mask"]
-                    v = self.critic.model(torch.Tensor(state_vec).unsqueeze(0)).item()
-
+                    v = self.critic.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0)).item()
                     if agent == 'player_0':
                         action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
-                        # Get action probabilities from the policy network (even if choosing randomly)
-                        with torch.no_grad():
-                            action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
-                            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
-                        
-                        # Apply action mask (set invalid actions to 0 probability)
-                        masked_probs = action_probs * action_mask
-                        masked_probs = masked_probs / masked_probs.sum()  # Renormalize
-                        
-                        # Randomly sample an action from valid ones
-                        valid_indices = np.where(action_mask == 1)[0]
-                        action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
-                        
-                        # Compute log probability of the chosen action
-                        lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
-                    
-                    last_action = np.eye(self.action_size)[action]
+                        raw_state = self._make_raw_state(agent)
+                        str_action, _ = self.opponent_agent.eval_step(raw_state)
+                        action = self._str2id[str_action]
+                        lp = 0.0          # dummy – we don’t learn from opponent moves
+                        # # Get action probabilities from the policy network (even if choosing randomly)
+                        # with torch.no_grad():
+                        #     action_logits = self.policy.model(torch.tensor(state_vec).unsqueeze(0))
+                        #     action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+
+                        # # Apply action mask (set invalid actions to 0 probability)
+                        # masked_probs = action_probs * action_mask
+                        # masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+
+                        # # Randomly sample an action from valid ones
+                        # valid_indices = np.where(action_mask == 1)[0]
+                        # action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+
+                        # # Compute log probability of the chosen action
+                        # lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+
+                    # last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["states"].append(state_vec)
                     agent_trajectories[agent]["actions"].append(action)
                     agent_trajectories[agent]["logps"].append(lp)
@@ -280,10 +292,10 @@ class PPO_interaction:
             # Truncate the dones and rewards from the start state (we need to stagger rewards for PPO)
             for agent, traj in agent_trajectories.items():
                 if len(traj["actions"]) > 0:
-                    traj["rewards"] = traj["rewards"][1:] # If the agent got to act, rewards are staggered. 
+                    traj["rewards"] = traj["rewards"][1:] # If the agent got to act, rewards are staggered.
                     # ie. if player_0 folds on turn 1, agent_1 does not act. Therefore they do not learn.
                     # player_0's rewards[0] is the reward conferred on reset, which==0. Clip this reward so that the rewards come 'after' the action (needs to work with GAE)
-                    # if player_0 did not fold on first turn, player_1 had a chance to act, but his first reward comes from 
+                    # if player_0 did not fold on first turn, player_1 had a chance to act, but his first reward comes from
                     advantages, returns = self.compute_gae(
                         traj["rewards"], traj["values"], traj["dones"],
                         self.critic.gamma, self.critic.lam
@@ -291,13 +303,37 @@ class PPO_interaction:
                     # Now add this to memory
                     for s, a, lp, adv, ret in zip(traj["states"], traj["actions"], traj["logps"], advantages, returns):
                         self.memory.push(s, a, lp, adv.item(), ret.item())
-              
+
 
             train_scores.append(agent_trajectories["player_0"]["rewards"][-1]) # Append the payoff of the current hand to train scores
             if len(self.memory) >= self.update_frequency:
                 self.update()
 
         return train_scores, self.policy
+
+    def _make_raw_state(self, agent_name: str):
+        """Return the (raw_obs, raw_legal_actions) pair for a PettingZoo agent.
+
+        Works for all RLCard-backed PettingZoo games, regardless of wrapper depth.
+        """
+        pid = 0 if agent_name == "player_0" else 1   # RLCard seat id
+
+        # Dive until we locate an object that has .get_state()
+        obj = self.env.unwrapped          # start at the raw_env
+        for attr in ("env", "game"):      # typical nesting chain
+            if hasattr(obj, "get_state"):
+                break
+            if hasattr(obj, attr):
+                obj = getattr(obj, attr)
+
+        if not hasattr(obj, "get_state"):
+            raise RuntimeError("Unable to locate RLCard environment with get_state()")
+
+        state = obj.get_state(pid)        # RLCard’s own dict
+        return {
+            "raw_obs":           state["raw_obs"],
+            "raw_legal_actions": state["raw_legal_actions"],
+        }
 
     def test_multiagent(self, policy):
         """
@@ -317,17 +353,17 @@ class PPO_interaction:
             # We will one-hot encode the action of the last agent. At start, no one has acted, so last_action = 0
             last_action = np.array([0]*self.action_size)
 
-            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information. 
+            for agent in self.env.agent_iter(): # Function that iterates through agents dynamically based on state information.
                 # NOTE: If an agent folds, then self.env.agent_iter() iterates from agent_0 to agent_1
 
-                obs, reward, termination, truncation, info = self.env.last() # info from last step. 
+                obs, reward, termination, truncation, info = self.env.last() # info from last step.
                 # print(f"{agent} self.env.last(): Terminated: {termination}, Reward: {reward}, last ation: {last_action}")
 
                 if termination or truncation:
                     # print(f"{agent}: last reward: {reward}")
                     agent_trajectories[agent]["values"].append(0.0) # A terminal state is reached, and v=0
                     agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
-                    action = None 
+                    action = None
                     last_action = np.array([0]*self.action_size)
                     self.env.step(action)
                     continue # Need this line to iterate to player_1 after game ends. If no continue, only player_0 receives rewards
@@ -340,23 +376,26 @@ class PPO_interaction:
                     if agent == 'player_0':
                         action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
+                        raw_state = self._make_raw_state(info)
+                        str_action, _ = self.opponent_agent.eval_step(raw_state)
+                        action = self._str2id[str_action]
                         # Get action probabilities from the policy network (even if choosing randomly)
-                        with torch.no_grad():
-                            action_logits = policy.model(torch.Tensor(state_vec).unsqueeze(0))
-                            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
-                        
-                        # Apply action mask (set invalid actions to 0 probability)
-                        masked_probs = action_probs * action_mask
-                        masked_probs = masked_probs / masked_probs.sum()  # Renormalize
-                        
-                        # Randomly sample an action from valid ones
-                        valid_indices = np.where(action_mask == 1)[0]
-                        action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
-                    
+                        # with torch.no_grad():
+                        #     action_logits = policy.model(torch.tensor(state_vec).unsqueeze(0))
+                        #     action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+
+                        # # Apply action mask (set invalid actions to 0 probability)
+                        # masked_probs = action_probs * action_mask
+                        # masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+
+                        # # Randomly sample an action from valid ones
+                        # valid_indices = np.where(action_mask == 1)[0]
+                        # action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+
                     last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
 
-                self.env.step(action) # Automatically terminates when an agent folds            
+                self.env.step(action) # Automatically terminates when an agent folds
 
             test_scores.append(agent_trajectories["player_0"]["rewards"][-1]) # Append the payoff of the current hand to train scores
 
@@ -368,7 +407,7 @@ class PPO_interaction:
         # maintain a value for each agent
 
         agent_rewards = {agent: [0] for agent in self.player_agents}
-        
+
         for _ in tqdm(range(self.testing_episodes)):
             self.test_env.reset()
             # print(self.test_env.agent_iter())
@@ -378,11 +417,11 @@ class PPO_interaction:
                     action = None
                 else:
                     state_vec   = obs["observation"]
-                    action_mask = obs["action_mask"] # Rules you can take based on the current iteration (ie. you can't bet after you fold) 
+                    action_mask = obs["action_mask"] # Rules you can take based on the current iteration (ie. you can't bet after you fold)
                     a, _        = self.act_multiagent(state_vec, action_mask) # ACtion for one agent. Named as such to distinguish from lunarlander 'act' function
                     action = a
                 self.test_env.step(action)
-                agent_rewards[agent].append(reward + agent_rewards[agent][-1]) 
+                agent_rewards[agent].append(reward + agent_rewards[agent][-1])
         return agent_rewards
     """
 
@@ -396,7 +435,7 @@ class PPO_interaction:
             states, actions, rewards, logprobs, dones, values = [], [], [], [], [], []
 
             s, _ = self.env.reset()
-            s_tensor = torch.Tensor(s)
+            s_tensor = torch.tensor(s, dtype=torch.float32, device=self.device)
             done = False
             episode_score = 0
             while not done:
@@ -425,7 +464,7 @@ class PPO_interaction:
 
             # End of trajectory
             # Append the value of the current state for the GAE calculation
-            values.append(torch.tensor(0.0))
+            values.append(torch.tensor(0.0), dtype=torch.float32, device=self.device)
 
             # Compute Generalized Advantage Estimation
             advantages, returns = self.compute_gae(rewards, values, dones, self.critic.gamma, self.critic.lam)
@@ -443,7 +482,7 @@ class PPO_interaction:
         test_scores = []
         for e in range(self.testing_episodes):
             s, _ = self.env.reset()
-            s_tensor = torch.Tensor(s)
+            s_tensor = torch.tensor(s, dtype=torch.float32, device=self.device)
             done = False
             episode_score = 0
             while not done:
