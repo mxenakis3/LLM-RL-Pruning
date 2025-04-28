@@ -17,7 +17,7 @@
 
 <!-- ABOUT THE PROJECT -->
 ## Instructions
-CS7750 Project: Accelerating Deep Multi-Agent Reinforcement Learning with LLM-Agents
+CS7643 Project: Accelerating Deep Multi-Agent Reinforcement Learning with LLM-Agents
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- Instructions -->
@@ -40,5 +40,5 @@ The code to generate results is available under /notebooks, and configurations c
 
 Specifically, 
 <ol>
-    <li>/notebooks/ppo_example_rl_Card and /notebooks/ppo_example_rl_Card_heuristic will generate results similar to those presented in section 5.2.2
+    <li>/notebooks/ppo_example_rl_Card and /notebooks/ppo_example_rl_Card_heuristic will generate results similar to those presented in section 5.2.2</li>
 </ol>
