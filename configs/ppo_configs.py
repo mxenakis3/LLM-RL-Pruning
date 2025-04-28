@@ -11,15 +11,15 @@ texas_holdem_config = Config({
 
 ppo_interaction_config_texas = Config({
   # INTERACTION CONFIGURATIONS:
-"training_episodes": 10,
-"testing_episodes": 5,
+"training_episodes": 70000,
+"testing_episodes": 3000,
 "bot_type": "random", # "heuristic" or "random"
 "c": 0.15, # Loss function clipping coefficient
 "batch_size":128
 , # Size of batch for SGD in update method.
 "capacity": 20000, # Size of experience tuple (s, a, r, s_, ...) memory
 "num_epochs": 4, # number of batches in each iteration of learning
-"update_frequency": 4000, # how many steps are taken before an update occurs
+"update_frequency": 1000, # how many steps are taken before an update occurs
 "kap_start" : 0.5, # The probability of samping an action from the LLM agent at the first timestep
 "kap_end": 0.001, # The min probability of sampling an action from the LLM agent
 "kap_decay_episodes": 8, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
