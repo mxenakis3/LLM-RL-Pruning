@@ -11,24 +11,25 @@ texas_holdem_config = Config({
 
 ppo_interaction_config_texas = Config({
   # INTERACTION CONFIGURATIONS:
-"training_episodes": 70000,
-"testing_episodes": 3000,
+"training_episodes": 10,
+"testing_episodes": 5,
 "bot_type": "random", # "heuristic" or "random"
-"c": 0.1, # Loss function clipping coefficient
-"batch_size":512, # Size of batch for SGD in update method.
+"c": 0.15, # Loss function clipping coefficient
+"batch_size":128
+, # Size of batch for SGD in update method.
 "capacity": 20000, # Size of experience tuple (s, a, r, s_, ...) memory
-"num_epochs": 6, # number of batches in each iteration of learning
+"num_epochs": 4, # number of batches in each iteration of learning
 "update_frequency": 4000, # how many steps are taken before an update occurs
-"kap_start" : 1.0, # The probability of samping an action from the LLM agent at the first timestep
+"kap_start" : 0.5, # The probability of samping an action from the LLM agent at the first timestep
 "kap_end": 0.001, # The min probability of sampling an action from the LLM agent
-"kap_decay_episodes": 3, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
+"kap_decay_episodes": 8, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
 "kap_decay_rate": 0.98, # For exponential decay: The rate of decay for kap, the probability that we sample from llm. kap = kap_start* kap_decay_rate^(episode_number)
 "kap_decay_type": "linear", # Exponential or linear
 })
 
 actor_configs_texas = Config({
 # AGENT CONFIGURATIONS
-"learning_rate": .0002,
+"learning_rate": 3e-5,
 "loss_function": "mseloss",
 "optimizer": "adam",
 "gamma": 0.99, # Discount factor
@@ -44,7 +45,7 @@ critic_configs_texas = Config({
 # INTERACTION CONFIGURATIONS:
 
 # AGENT CONFIGURATIONS
-"learning_rate": 5e-4,
+"learning_rate": 3e-4 ,
 "loss_function": "mseloss",
 "optimizer": "adam",
 "gamma": 1.0, # Discount factor

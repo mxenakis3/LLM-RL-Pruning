@@ -3,7 +3,7 @@ import time
 import requests
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from multiprocessing import freeze_support
 def start_server():
     """Launch vLLM server in background"""
     cmd = [

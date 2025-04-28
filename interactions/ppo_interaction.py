@@ -1,17 +1,18 @@
 import torch as torch
 from agents.ppo_agents import PPOActorNetwork, PPOCriticNetwork
-# from agents.llm_chain_of_thought_agent import Chain_of_Thought
+from agents.llm_chain_of_thought_agent import Chain_of_Thought
 from tqdm import tqdm
 import torch.distributions as dist
 from replay_buffer import PPOReplayBuffer
 import numpy as np
 import random
 from utils import get_environment, get_render_mode, decay_prob, texas_holdem_state_to_json
-from torch.distributions import Categorical
+from torch.distributions import Categorical 
 from rlcard.models.limitholdem_rule_models import LimitholdemRuleAgentV1
 
 class PPO_interaction:
     def __init__(self, interaction_configs, env_configs, actor_configs, critic_configs, llm_configs):
+
         # load parallel TexasHoldem or LunarLander, etc.
         self.env      = get_environment(env_configs, train=True)
         self.test_env = get_environment(env_configs, train=False)
@@ -82,7 +83,7 @@ class PPO_interaction:
 
         # Init LLM
         self.llm_configs = llm_configs
-        # self.llm_agent = Chain_of_Thought(config=llm_configs)
+        self.llm_agent = Chain_of_Thought(config=llm_configs)
         self.llm_system_message = self.llm_configs.system_message["content"] # This string needs to provide information about the state
 
         # LLM decay parameters
@@ -277,13 +278,13 @@ class PPO_interaction:
 
         """
         with torch.no_grad():
-            action_logits = self.policy.model(torch.Tensor(state_vec).unsqueeze(0))
-            action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+            action_logits = self.policy.model(torch.tensor(state_vec, dtype=torch.float, device=self.device).unsqueeze(0))
+
+            action_probs = torch.softmax(action_logits, dim=-1).squeeze().cpu().numpy()
 
             # Update state message
             if action_mask is not None:
                 # Get set of legal moves
-                print(type(action_mask))
                 legal_actions = [moves_dict[i] for i, mask in enumerate(action_mask) if mask == 1]
 
                 # Apply action mask (set invalid actions to 0 probability)
@@ -350,7 +351,13 @@ class PPO_interaction:
                     action_mask = obs["action_mask"]
                     v = self.critic.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0)).item()
                     if agent == 'player_0':
-                        action, lp = self.act_multiagent(state_vec, action_mask)
+                        p = np.random.uniform(0, 1)
+                        if p <= self.kap:
+                            action, lp = self.get_llm_action(state_vec, action_mask, moves_dict)
+                        else:
+                            # print(state_vec.device)
+                            # print(action_mask.device)
+                            action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
                         if self.bot_type == "heuristic":
                             raw_state, lp = self.make_raw_state(agent, state_vec, action_mask)
@@ -358,21 +365,33 @@ class PPO_interaction:
                             # print(str_action)
                             action = self._str2id[str_action]
                         elif self.bot_type == "random":
-                            # Get action probabilities from the policy network (even if choosing randomly)
                             with torch.no_grad():
-                                action_logits = self.policy.model(torch.tensor(state_vec, dtype=torch.float32).unsqueeze(0))
-                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+                                action_logits = self.policy.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0))
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().cpu().numpy()
 
+
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().cpu().numpy()
                             # Apply action mask (set invalid actions to 0 probability)
-                            masked_probs = action_probs * action_mask
-                            masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                                masked_probs = action_probs * action_mask
 
-                            # Randomly sample an action from valid ones
-                            valid_indices = np.where(action_mask == 1)[0]
-                            action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                                # Ensure masked_probs is a torch tensor
+                                if isinstance(masked_probs, np.ndarray):
+                                    masked_probs = torch.tensor(masked_probs, device=self.device, dtype=torch.float32)
+                                masked_probs = masked_probs / masked_probs.sum()  # Renormalize
 
-                            # Compute log probability of the chosen action
-                            lp = np.log(masked_probs[action] + 1e-10)  # Small epsilon to avoid log(0)
+                                # Identify valid indices (where action_mask is 1)
+                                valid_indices = np.where(action_mask == 1)[0]
+
+                                # Ensure valid_indices is a numpy array on CPU
+                                valid_indices = valid_indices if isinstance(valid_indices, np.ndarray) else valid_indices.cpu().numpy()
+
+                                # Get masked probabilities for valid indices
+                                masked_probs_valid = masked_probs[valid_indices].cpu().numpy() if isinstance(masked_probs, torch.Tensor) else masked_probs[valid_indices]
+
+                                # Perform action selection
+                                action = np.random.choice(valid_indices, p=masked_probs_valid)
+
+                                lp = np.log(masked_probs[action].cpu().item() + 1e-10)
 
                     last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["states"].append(state_vec)
@@ -454,25 +473,40 @@ class PPO_interaction:
                     if agent == 'player_0':
                         action, lp = self.act_multiagent(state_vec, action_mask)
                     else:
-
                         if self.bot_type == "heuristic":
-                            raw_state, lp = self.make_raw_state(info, state_vec, action_mask)
-                            str_action, _ = self.opponent_agent.eval_step(raw_state)
+                            raw_state, lp = self.make_raw_state(agent, state_vec, action_mask)
+                            str_action, _= self.opponent_agent.eval_step(raw_state)
+                            # print(str_action)
                             action = self._str2id[str_action]
                         elif self.bot_type == "random":
                             # Get action probabilities from the policy network (even if choosing randomly)
                             with torch.no_grad():
-                                action_logits = policy.model(torch.tensor(state_vec,dtype=torch.float32).unsqueeze(0))
-                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().numpy()
+                                action_logits = self.policy.model(torch.tensor(state_vec, dtype=torch.float32, device=self.device).unsqueeze(0))
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().cpu().numpy()
 
+
+                                action_probs = torch.softmax(action_logits, dim=-1).squeeze().cpu().numpy()
                             # Apply action mask (set invalid actions to 0 probability)
-                            masked_probs = action_probs * action_mask
-                            masked_probs = masked_probs / masked_probs.sum()  # Renormalize
+                                masked_probs = action_probs * action_mask
 
-                            # Randomly sample an action from valid ones
-                            valid_indices = np.where(action_mask == 1)[0]
-                            action = np.random.choice(valid_indices, p=masked_probs[valid_indices])
+                                # Ensure masked_probs is a torch tensor
+                                if isinstance(masked_probs, np.ndarray):
+                                    masked_probs = torch.tensor(masked_probs, device=self.device, dtype=torch.float32)
+                                masked_probs = masked_probs / masked_probs.sum()  # Renormalize
 
+                                # Identify valid indices (where action_mask is 1)
+                                valid_indices = np.where(action_mask == 1)[0]
+
+                                # Ensure valid_indices is a numpy array on CPU
+                                valid_indices = valid_indices if isinstance(valid_indices, np.ndarray) else valid_indices.cpu().numpy()
+
+                                # Get masked probabilities for valid indices
+                                masked_probs_valid = masked_probs[valid_indices].cpu().numpy() if isinstance(masked_probs, torch.Tensor) else masked_probs[valid_indices]
+
+                                # Perform action selection
+                                action = np.random.choice(valid_indices, p=masked_probs_valid)
+
+                                lp = np.log(masked_probs[action].cpu().item() + 1e-10)
                     last_action = np.eye(self.action_size)[action]
                     agent_trajectories[agent]["rewards"].append(reward) # Append reward for the round
 

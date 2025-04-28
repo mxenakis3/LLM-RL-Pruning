@@ -5,7 +5,11 @@ from functools import partial
 #llm = LLM(model="meta-llama/Meta-Llama-3-8B-Instruct")
 #llm = LLM(model="deepseek-ai/DeepSeek-V3",
 #llm = LLM(model="Qwen/Qwen2.5-14B-Instruct-1M",
+serving_model = None
 def get_model(model="deepseek-ai/deepseek-llm-7b-chat"):
+    global serving_model
+    if serving_model is not None:
+        return serving_model
     # if model too large, increase tp/pp size
     llm = LLM(model=model, tensor_parallel_size=1, pipeline_parallel_size=1, trust_remote_code=True)
     sampling_params = SamplingParams(temperature=0.5, max_tokens=8192)
@@ -15,6 +19,8 @@ def get_model(model="deepseek-ai/deepseek-llm-7b-chat"):
                    use_tqdm=False)
         #chat_template_content_format='openai',
         return outputs
+    serving_model = partial(model_call, instanced_model=llm, sampling_params=sampling_params)
+    return serving_model
     return partial(model_call, instanced_model=llm, sampling_params=sampling_params)
  
 def print_outputs(outputs):
