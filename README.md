@@ -36,4 +36,9 @@ To get a local copy up and running follow these simple example steps.
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Running the code
-The code to generate results is available under /notebooks, and configurations can be changed under /configs
+The code to generate results is available under /notebooks, and configurations can be changed under /configs.  Running the notebooks sequentially will generate similar results as what was presented in the report, with results stored in pickle files under the same directory.  
+
+Specifically, 
+<ol>
+    <li>/notebooks/ppo_example_rl_Card and /notebooks/ppo_example_rl_Card_heuristic will generate results similar to those presented in section 5.2.2
+</ol>
