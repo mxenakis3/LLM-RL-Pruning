@@ -40,7 +40,7 @@ ppo_interaction_config_texas_random = Config({
 "update_frequency": 1000, # how many steps are taken before an update occurs
 "kap_start" : 0.5, # The probability of samping an action from the LLM agent at the first timestep
 "kap_end": 0.001, # The min probability of sampling an action from the LLM agent
-"kap_decay_episodes": 1000, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
+"kap_decay_episodes": 4000, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
 "kap_decay_rate": 0.98, # For exponential decay: The rate of decay for kap, the probability that we sample from llm. kap = kap_start* kap_decay_rate^(episode_number)
 "kap_decay_type": "linear", # Exponential or linear
 })
@@ -58,7 +58,7 @@ ppo_interaction_config_texas_heuristic = Config({
 "update_frequency": 1000, # how many steps are taken before an update occurs
 "kap_start" : 0.5, # The probability of samping an action from the LLM agent at the first timestep
 "kap_end": 0.001, # The min probability of sampling an action from the LLM agent
-"kap_decay_episodes": 1000, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
+"kap_decay_episodes": 4000, # For linear decay: The number of steps we are taking to decay kap. Each episode, kap decays by (kap_start - kap_finish)/ kap_decay_episodes.
 "kap_decay_rate": 0.98, # For exponential decay: The rate of decay for kap, the probability that we sample from llm. kap = kap_start* kap_decay_rate^(episode_number)
 "kap_decay_type": "linear", # Exponential or linear
 })

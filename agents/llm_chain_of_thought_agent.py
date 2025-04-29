@@ -18,29 +18,25 @@ class Chain_of_Thought():
     self.messages = []
 
   def __call__(self):
-    """ 
-    Perform Chain of Thought Reasoning.
-    Inputs:  None, but the completion will come from current messages
-    outputs: An unformatted action selection
-    """
+      """ 
+      Perform Chain of Thought Reasoning.
+      Inputs:  None, but the completion will come from current messages
+      outputs: An unformatted action selection
+      """
+      try:
+          for cot_prompt in self.cot_prompts: 
+              self.messages.append(cot_prompt)
+              completion = self._execute()
+              self.messages.append(completion)
 
-    # Assume system_message has already been appended in interaction...
-    # Iterate through chain of thought
-    for cot_prompt in self.cot_prompts: 
+          action = self._check_action_selection(self.messages[-1]["content"])
 
-      # cot_prompt format: {"role": "user", "content": "chain of thought string"}
-      self.messages.append(cot_prompt)
-      # Prompt the client based on the current set of messages
-      completion = self._execute()
-      self.messages.append(completion)
-    
-    # Input the last action chosen
-    #action = self._check_action_selection(self.messages[-1].choices[0].message.content)
-    # print(f"{self.messages[-2]['content']}")
-    action = self._check_action_selection(self.messages[-1]["content"])
-    # Clear messages from training step
-    self.messages = []
-    return action
+      except Exception as e:
+          print(f"Exception during action selection: {e}")
+          action = np.random.randint(0, 4)  # Random between 0,1,2,3
+
+      self.messages = []
+      return action
 
   def _execute(self):
     #completion = self.client.chat.completions.create(
