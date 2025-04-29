@@ -29,10 +29,15 @@ To get a local copy up and running follow these simple example steps.
    ```sh
    git clone https://github.com/mxenakis3/LLM-RL-Pruning.git
    ```
-3. Install python packages 
+2. Install python packages 
    ```sh
    pip install -r requirements.txt
    ```
+3. Install serving framework
+   ```sh
+   pip install vllm
+   ```
+   Note that vllm will cache model weights (~15GB for this project).
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Running the code
