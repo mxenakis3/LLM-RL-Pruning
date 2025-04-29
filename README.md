@@ -40,5 +40,8 @@ The code to generate results is available under /notebooks, and configurations c
 
 Specifically, 
 <ol>
-    <li>/notebooks/ppo_example_rl_Card and /notebooks/ppo_example_rl_Card_heuristic will generate results similar to those presented in section 5.2.2</li>
+  <li>/notebooks/2025_04_26_lunar_lander_dqn.ipynb will generate results similar to those presented in section 5.2.1</li>
+  <li>/notebooks/ppo_example_rl_Card.ipynb and /notebooks/ppo_example_rl_Card_heuristic.ipynb will generate results similar to those presented in section 5.2.2</li>
+  <li>/notebooks/TOOL_CALLING_LUNARLANDER.ipynb will generate results similar to those presented in section 5.3.1</li>
+  <li>/notebooks/ppo_example_rl_Card_llm.ipynb will generate results similar to those presented in section 5.3.2</li>
 </ol>
